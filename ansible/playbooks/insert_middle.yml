@@ -1,0 +1,170 @@
+---
+# Вставить middle в уже работающую пару, не пересоздавая клиентов.
+#
+# Из страны до exit уже может не быть SSH. До middle (свежий зарубежный IP)
+# и до entry (RU) — есть. На exit этот playbook заходит только так:
+#   ноутбук → SSH middle → SSH exit
+# Туннель AWG для этого не нужен: middle сам за границей и до exit достучится.
+#
+# После прогона допишите на vpn_exit в hosts.yml:
+#   ansible_ssh_common_args: '-o ProxyJump=<middle_user>@<middle_ip>'
+# Дальше exit обслуживается только через middle.
+#
+#   cd ansible
+#   ansible-playbook -i inventory/hosts.yml playbooks/insert_middle.yml
+
+- name: Preflight — ровно один middle
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  tasks:
+    - name: refuse empty middle
+      ansible.builtin.fail:
+        msg: >
+          insert_middle.yml нужен хост в группе middle.
+          Добавьте vpn_middle в inventory/hosts.yml.
+      when: groups['middle'] | default([]) | length == 0
+
+    - name: refuse several middles
+      ansible.builtin.fail:
+        msg: "insert_middle.yml рассчитан на один хост в группе middle."
+      when: groups['middle'] | default([]) | length > 1
+
+- name: Preflight — живой entry
+  hosts: entry
+  become: true
+  tasks:
+    - name: awg0 must already exist
+      ansible.builtin.stat:
+        path: /etc/amnezia/amneziawg/awg0.conf
+      register: awg0_installed
+
+    - name: refuse if pair not bootstrapped
+      ansible.builtin.fail:
+        msg: >
+          На {{ inventory_hostname }} нет /etc/amnezia/amneziawg/awg0.conf.
+          Сначала bootstrap пары, либо используйте bootstrap.yml для новой тройки.
+      when: not awg0_installed.stat.exists
+
+# ── Только новая VPS middle (shared 00–04) ──────────────────────────────────
+
+- name: Base setup (middle)
+  hosts: middle
+  become: true
+  handlers:
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../handlers/main.yml"
+  tasks:
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/00_bootstrap_init.yml"
+    - vars: { bootstrap_step: "shared_01_ssh_fail2ban.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/01_ssh_fail2ban.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "shared_01_ssh_fail2ban.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "shared_02_unattended_updates.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/02_unattended_updates.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "shared_02_unattended_updates.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "shared_03_install_amneziawg.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/03_install_amneziawg.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "shared_03_install_amneziawg.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "shared_04_deploy_awg_scripts.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/04_deploy_awg_scripts.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "shared_04_deploy_awg_scripts.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists
+
+# ── Exit через ProxyJump: из страны напрямую его уже может не быть ─────────
+
+- name: Add middle peer on live exit
+  hosts: exit
+  become: true
+  vars:
+    ansible_ssh_common_args: >-
+      -o ProxyJump={{ hostvars[groups['middle'][0]].ansible_user }}@{{ hostvars[groups['middle'][0]].ansible_host }}
+  handlers:
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../handlers/main.yml"
+  tasks:
+    - vars: { bootstrap_step: "exit_add_middle_peer.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/exit/add_middle_peer.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "exit_add_middle_peer.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists
+
+# ── Middle: как в bootstrap тройки ──────────────────────────────────────────
+
+- name: Middle node
+  hosts: middle
+  become: true
+  vars:
+    awg_output_dir: "{{ awg_output_dir_middle }}"
+    uplink_artifact: "{{ middle_uplink_artifact }}"
+  handlers:
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../handlers/main.yml"
+  tasks:
+    - vars: { bootstrap_step: "middle_05_create_awg_config.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/middle/05_create_awg_config.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "middle_05_create_awg_config.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "middle_06_configure_awg1.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/forwarder/06_configure_awg1.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "middle_06_configure_awg1.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "middle_07_network_firewall.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/forwarder/07_network_firewall.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "middle_07_network_firewall.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "middle_08_routing.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/forwarder/08_routing.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "middle_08_routing.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "middle_09_enable_awg.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/forwarder/09_enable_awg.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "middle_09_enable_awg.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists
+
+# ── Entry: только awg1, клиенты на awg0 остаются ────────────────────────────
+
+- name: Rewire entry awg1 to middle
+  hosts: entry
+  become: true
+  vars:
+    awg_output_dir: "{{ awg_output_dir_entry }}"
+    uplink_artifact: "{{ entry_uplink_artifact }}"
+  handlers:
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../handlers/main.yml"
+  tasks:
+    - vars: { bootstrap_step: "entry_rewire_awg1.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/entry/rewire_awg1.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "entry_rewire_awg1.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists

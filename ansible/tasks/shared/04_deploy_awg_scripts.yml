@@ -1,0 +1,54 @@
+# Гайд: «Создаём конфиг для AmneziaWG» — scp набора файлов, venv, pip
+---
+- name: pack awg bundle (control node)
+  ansible.builtin.command:
+    cmd: >-
+      tar czf /tmp/vpn-scripts-awg.tar.gz
+      --exclude=__pycache__ --exclude='*.pyc'
+      awg_manage.py awg_gen.py awg_add.sh requirements.txt packages
+    chdir: "{{ vpn_repo_root }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: unpack awg bundle on VPS
+  ansible.builtin.unarchive:
+    src: /tmp/vpn-scripts-awg.tar.gz
+    dest: "{{ awg_scripts_dir }}"
+    remote_src: false
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+
+- name: executable bits on awg scripts
+  ansible.builtin.file:
+    path: "{{ awg_scripts_dir }}/{{ item }}"
+    mode: "0755"
+  loop:
+    - awg_manage.py
+    - awg_gen.py
+    - awg_add.sh
+
+- name: python3-venv for .venv
+  ansible.builtin.apt:
+    name: python3-venv
+    state: present
+
+- name: python -m venv .venv
+  ansible.builtin.shell: |
+    set -euo pipefail
+    cd "{{ awg_scripts_dir }}"
+    python -m venv .venv
+  args:
+    executable: /bin/bash
+    creates: "{{ awg_venv_dir }}/bin/activate"
+  become_user: "{{ ansible_user }}"
+
+- name: pip install -r requirements.txt
+  ansible.builtin.shell: |
+    set -euo pipefail
+    cd "{{ awg_scripts_dir }}"
+    source .venv/bin/activate
+    pip install -r requirements.txt
+  args:
+    executable: /bin/bash
+  become_user: "{{ ansible_user }}"

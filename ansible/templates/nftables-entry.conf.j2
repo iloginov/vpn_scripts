@@ -1,0 +1,46 @@
+#!/usr/sbin/nft -f
+
+flush ruleset
+
+table inet filter {
+    chain input {
+        type filter hook input priority filter; policy drop;
+
+        iif lo accept
+        ct state established,related accept
+
+        tcp dport 22 accept
+        udp dport {{ awg_listen_port }} accept
+
+        ip protocol icmp accept
+        meta l4proto ipv6-icmp accept
+    }
+
+    chain forward {
+        type filter hook forward priority filter; policy accept;
+        ct state established,related accept
+    }
+
+    chain output {
+        type filter hook output priority filter; policy accept;
+    }
+}
+
+table ip nat {
+    chain postrouting {
+        type nat hook postrouting priority srcnat; policy accept;
+        ip saddr {{ awg_subnet }} oifname "awg1" masquerade
+    }
+}
+
+table ip mangle {
+    chain forward {
+        type filter hook forward priority mangle; policy accept;
+
+        oifname "awg1" tcp flags syn tcp option maxseg size set rt mtu
+        iifname "awg1" tcp flags syn tcp option maxseg size set rt mtu
+
+        oifname "awg0" tcp flags syn tcp option maxseg size set rt mtu
+        iifname "awg0" tcp flags syn tcp option maxseg size set rt mtu
+    }
+}

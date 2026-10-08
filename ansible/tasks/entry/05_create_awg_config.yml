@@ -1,0 +1,56 @@
+# Гайд (entry): «Создаём конфиг для AmneziaWG» — init
+---
+- name: refuse if awg0 already configured
+  ansible.builtin.stat:
+    path: /etc/amnezia/amneziawg/awg0.conf
+  register: awg0_installed
+
+- name: stop if already bootstrapped
+  ansible.builtin.fail:
+    msg: >
+      /etc/amnezia/amneziawg/awg0.conf уже существует.
+      Повторный bootstrap не поддерживается.
+  when: awg0_installed.stat.exists
+
+- name: mkdir amneziawg_3_entry
+  ansible.builtin.file:
+    path: "{{ awg_output_dir_entry }}"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0755"
+
+- name: awg_manage init
+  ansible.builtin.shell: |
+    set -euo pipefail
+    cd "{{ awg_scripts_dir }}"
+    source .venv/bin/activate
+    python awg_manage.py init \
+      --listen-port {{ awg_listen_port }} \
+      --subnet {{ awg_subnet | quote }} \
+      --server-host {{ endpoint_host | quote }} \
+      --server-name {{ server_name | quote }} \
+      --mtu {{ awg_mtu }} \
+      --dns {{ awg_dns | quote }} \
+      --mimic {{ awg_mimic | quote }} \
+      --intensity {{ awg_intensity | quote }} \
+      --junk-level {{ awg_junk_level }} \
+      --output-dir {{ awg_output_dir_entry | quote }}
+  args:
+    executable: /bin/bash
+  become_user: "{{ ansible_user }}"
+  changed_when: true
+
+# После init peers ещё нет — хуки policy routing дописываем в конец server_awg0.conf.
+- name: policy routing hooks in server_awg0.conf
+  ansible.builtin.lineinfile:
+    path: "{{ awg_output_dir_entry }}/server_awg0.conf"
+    line: "{{ item }}"
+    insertafter: EOF
+  loop:
+    - "PostUp = ip rule add from {{ awg_subnet }} table {{ clientroute_table_name }} 2>/dev/null || true"
+    - "PostUp = ip rule add iif awg0 table {{ clientroute_table_name }} 2>/dev/null || true"
+    - "PostUp = ip rule add to {{ awg_subnet }} table main prio 1000 2>/dev/null || true"
+    - "PostDown = ip rule del from {{ awg_subnet }} table {{ clientroute_table_name }} 2>/dev/null || true"
+    - "PostDown = ip rule del iif awg0 table {{ clientroute_table_name }} 2>/dev/null || true"
+    - "PostDown = ip rule del to {{ awg_subnet }} table main prio 1000 2>/dev/null || true"

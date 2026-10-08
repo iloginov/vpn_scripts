@@ -1,0 +1,27 @@
+# Общий шаг: sysctl + nftables (NAT подсети на awg1)
+---
+- name: sysctl ip_forward
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/sysctl-forwarding.conf.j2"
+    dest: /etc/sysctl.d/99-forwarding.conf
+    mode: "0644"
+  notify: reload sysctl
+
+- name: nftables.conf
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/nftables-entry.conf.j2"
+    dest: /etc/nftables.conf
+    mode: "0644"
+    validate: /usr/sbin/nft -c -f %s
+  notify: reload nftables
+
+- name: apply sysctl
+  ansible.builtin.command:
+    cmd: sysctl --system
+  changed_when: false
+
+- name: enable nftables
+  ansible.builtin.systemd:
+    name: nftables
+    enabled: true
+    state: restarted

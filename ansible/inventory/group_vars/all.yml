@@ -1,0 +1,36 @@
+---
+# Путь к корню репозитория vpn_scripts на control node (ноутбук).
+vpn_repo_root: "{{ playbook_dir }}/../.."
+
+# Скрипты и каталоги вывода awg_manage (как amneziawg_3_<ts>, но фиксированные имена).
+# У root домашний каталог /root, не /home/root.
+awg_user_home: "{{ '/root' if ansible_user == 'root' else '/home/' ~ ansible_user }}"
+awg_scripts_dir: "{{ awg_user_home }}/awg"
+awg_venv_dir: "{{ awg_scripts_dir }}/.venv"
+awg_output_dir_exit: "{{ awg_scripts_dir }}/amneziawg_3_exit"
+awg_output_dir_entry: "{{ awg_scripts_dir }}/amneziawg_3_entry"
+awg_output_dir_middle: "{{ awg_scripts_dir }}/amneziawg_3_middle"
+
+# Dot-файлы state machine bootstrap (не путать с ~/.ansible на ноутбуке).
+awg_bootstrap_state_dir: "{{ awg_scripts_dir }}/.vpn-bootstrap"
+
+awg_listen_port: 443
+awg_mtu: 1280
+awg_mimic: quic_initial
+awg_intensity: medium
+awg_junk_level: 5
+awg_dns: "1.1.1.1,1.0.0.1"
+
+# Пиры межсерверных туннелей. Пара: exit←transit. Тройка: exit←middle←entry.
+transit_peer_name: transit
+middle_peer_name: middle
+entry_peer_name: entry
+
+# Топология по inventory: непустая группа middle → тройка, иначе пара.
+exit_peer_name: "{{ middle_peer_name if (groups['middle'] | default([]) | length > 0) else transit_peer_name }}"
+exit_uplink_artifact: "client_{{ exit_peer_name }}.conf"
+middle_uplink_artifact: "client_{{ middle_peer_name }}.conf"
+entry_uplink_artifact: "{{ ('client_' ~ entry_peer_name ~ '.conf') if (groups['middle'] | default([]) | length > 0) else ('client_' ~ transit_peer_name ~ '.conf') }}"
+
+clientroute_table_id: 100
+clientroute_table_name: clientroute

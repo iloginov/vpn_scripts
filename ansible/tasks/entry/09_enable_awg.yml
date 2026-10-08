@@ -1,0 +1,5 @@
+# Гайд (entry): «Поднимаем интерфейсы» + финальный cp
+---
+- ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/forwarder/09_enable_awg.yml"
+  vars:
+    awg_output_dir: "{{ awg_output_dir | default(awg_output_dir_entry) }}"

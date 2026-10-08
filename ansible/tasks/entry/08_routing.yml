@@ -1,0 +1,3 @@
+# Гайд (entry): «Настраиваем маршрутизацию» — rt_tables
+---
+- ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/forwarder/08_routing.yml"

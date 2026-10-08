@@ -1,0 +1,45 @@
+# Общий шаг: client_*.conf → awg1, # DNS, Table = off.
+# Требует vars: awg_output_dir, uplink_artifact
+---
+- name: ensure uplink artifact on control node
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/../artifacts/{{ uplink_artifact }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: uplink_artifact_stat
+
+- name: need previous hop play first
+  ansible.builtin.fail:
+    msg: "Нет artifacts/{{ uplink_artifact }} — сначала play предыдущего hop."
+  when: not uplink_artifact_stat.stat.exists
+  run_once: true
+
+- name: cp uplink artifact (будущий awg1)
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../artifacts/{{ uplink_artifact }}"
+    dest: "{{ awg_output_dir }}/awg1.conf"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0600"
+
+- name: vim awg1 — закомментировать DNS
+  ansible.builtin.replace:
+    path: "{{ awg_output_dir }}/awg1.conf"
+    regexp: '(?m)^(DNS\s*=.*)$'
+    replace: '# \1'
+
+# Тут, к сожалению, косяк, пустая строка не будет создана,
+# потому что lineinfile старается делать всё идемпотентно,
+# то есть, он проверит, что перед [Peer] уже есть пустая строка
+# и не будет добавлять ешё одну, как мы попросили.
+- name: vim awg1 — Table = off и PostUp route
+  ansible.builtin.lineinfile:
+    path: "{{ awg_output_dir }}/awg1.conf"
+    line: "{{ item }}"
+    insertbefore: '^\[Peer\]'
+  loop:
+    - "Table = off"
+    - "PostUp = ip route add default dev awg1 table {{ clientroute_table_name }} 2>/dev/null || true"
+    - "PostDown = ip route del default dev awg1 table {{ clientroute_table_name }} 2>/dev/null || true"
+    - ""

@@ -1,0 +1,26 @@
+# Гайд (exit): «Включаем AmneziaWG»
+---
+- name: ensure /etc/amnezia/amneziawg
+  ansible.builtin.file:
+    path: /etc/amnezia/amneziawg
+    state: directory
+    mode: "0755"
+
+- name: cp server_awg0.conf → awg0.conf
+  ansible.builtin.copy:
+    src: "{{ awg_output_dir_exit }}/server_awg0.conf"
+    dest: /etc/amnezia/amneziawg/awg0.conf
+    remote_src: true
+    mode: "0600"
+
+- name: awg-quick up awg0
+  ansible.builtin.command:
+    cmd: awg-quick up awg0
+  register: awg0_up
+  changed_when: "'already exists' not in (awg0_up.stderr | default(''))"
+  failed_when: awg0_up.rc != 0 and ('already exists' not in (awg0_up.stderr | default('')))
+
+- name: systemctl enable awg-quick@awg0
+  ansible.builtin.systemd:
+    name: awg-quick@awg0
+    enabled: true

@@ -1,0 +1,36 @@
+# Живая пара: заменить только awg1 на entry (клиенты на awg0 не трогаем).
+# Требует play vars: awg_output_dir, uplink_artifact
+---
+- ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/forwarder/06_configure_awg1.yml"
+
+- name: backup live awg1.conf
+  ansible.builtin.copy:
+    src: /etc/amnezia/amneziawg/awg1.conf
+    dest: /etc/amnezia/amneziawg/awg1.conf.bak
+    remote_src: true
+    mode: "0600"
+    backup: false
+
+- name: cp new awg1.conf into /etc/amnezia
+  ansible.builtin.copy:
+    src: "{{ awg_output_dir }}/awg1.conf"
+    dest: /etc/amnezia/amneziawg/awg1.conf
+    remote_src: true
+    mode: "0600"
+
+- name: awg-quick down awg1
+  ansible.builtin.command:
+    cmd: awg-quick down awg1
+  register: awg1_down
+  changed_when: true
+  failed_when: >
+    awg1_down.rc != 0
+    and ('is not a WireGuard interface' not in (awg1_down.stderr | default('')))
+    and ('is not an AmneziaWG interface' not in (awg1_down.stderr | default('')))
+
+- name: awg-quick up awg1
+  ansible.builtin.command:
+    cmd: awg-quick up awg1
+  register: awg1_up
+  changed_when: "'already exists' not in (awg1_up.stderr | default(''))"
+  failed_when: awg1_up.rc != 0 and ('already exists' not in (awg1_up.stderr | default('')))

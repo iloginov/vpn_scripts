@@ -1,0 +1,181 @@
+---
+# Первичная настройка пары (exit + entry) или тройки (exit + middle + entry).
+# Топология: непустая группа middle в inventory → тройка, иначе пара.
+#
+#   cd ansible
+#   ansible-playbook -i inventory/hosts.yml playbooks/bootstrap.yml
+
+# ── Общее для всех VPS (разделы b/c до «создаём конфиг») ───────────────────
+
+- name: Base setup (exit + entry + middle)
+  hosts: exit:entry:middle
+  become: true
+  handlers:
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../handlers/main.yml"
+  tasks:
+  # Инициализируем каталог state machine
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/00_bootstrap_init.yml"
+  # Настраиваем SSH и ставим Fail2ban
+    - vars: { bootstrap_step: "shared_01_ssh_fail2ban.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/01_ssh_fail2ban.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "shared_01_ssh_fail2ban.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists
+  # Вырубаем unattended updates
+    - vars: { bootstrap_step: "shared_02_unattended_updates.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/02_unattended_updates.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "shared_02_unattended_updates.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists
+  # Устанавливаем AmneziaWG
+    - vars: { bootstrap_step: "shared_03_install_amneziawg.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/03_install_amneziawg.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "shared_03_install_amneziawg.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists
+  # Архив скриптов → ~/awg, .venv, pip install
+    - vars: { bootstrap_step: "shared_04_deploy_awg_scripts.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/04_deploy_awg_scripts.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "shared_04_deploy_awg_scripts.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists
+
+# ── Выходная нода (docs/deploy_exit.md) ─────────────────────────────────────
+
+- name: Exit node
+  hosts: exit
+  become: true
+  handlers:
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../handlers/main.yml"
+  tasks:
+  # Создаём конфиг для AmneziaWG (init, add transit|middle)
+    - vars: { bootstrap_step: "exit_05_create_awg_config.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/exit/05_create_awg_config.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "exit_05_create_awg_config.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists
+  # Настраиваем сеть и файрвол
+    - vars: { bootstrap_step: "exit_06_network_firewall.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/exit/06_network_firewall.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "exit_06_network_firewall.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists
+  # Включаем AmneziaWG
+    - vars: { bootstrap_step: "exit_07_enable_awg0.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/exit/07_enable_awg0.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "exit_07_enable_awg0.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists
+
+# ── Middle (docs/deploy_middle.md); no-op, если группа пустая ───────────────
+
+- name: Middle node
+  hosts: middle
+  become: true
+  vars:
+    awg_output_dir: "{{ awg_output_dir_middle }}"
+    uplink_artifact: "{{ middle_uplink_artifact }}"
+  handlers:
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../handlers/main.yml"
+  tasks:
+    - vars: { bootstrap_step: "middle_05_create_awg_config.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/middle/05_create_awg_config.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "middle_05_create_awg_config.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "middle_06_configure_awg1.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/forwarder/06_configure_awg1.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "middle_06_configure_awg1.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "middle_07_network_firewall.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/forwarder/07_network_firewall.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "middle_07_network_firewall.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "middle_08_routing.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/forwarder/08_routing.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "middle_08_routing.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "middle_09_enable_awg.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/forwarder/09_enable_awg.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "middle_09_enable_awg.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists
+
+# ── Транзитная нода (docs/deploy_transit.md) ──────────────────────────────────
+
+- name: Entry node
+  hosts: entry
+  become: true
+  vars:
+    awg_output_dir: "{{ awg_output_dir_entry }}"
+    uplink_artifact: "{{ entry_uplink_artifact }}"
+  handlers:
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../handlers/main.yml"
+  tasks:
+  # Создаём конфиг для AmneziaWG (init)
+    - vars: { bootstrap_step: "entry_05_create_awg_config.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/entry/05_create_awg_config.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "entry_05_create_awg_config.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists
+  # awg1 из client_transit.conf (пара) или client_entry.conf (тройка)
+    - vars: { bootstrap_step: "entry_06_configure_awg1.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/forwarder/06_configure_awg1.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "entry_06_configure_awg1.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists
+  # Настраиваем сеть и файрвол
+    - vars: { bootstrap_step: "entry_07_network_firewall.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/forwarder/07_network_firewall.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "entry_07_network_firewall.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists
+  # Маршрутизация (policy routing, rt_tables)
+    - vars: { bootstrap_step: "entry_08_routing.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/forwarder/08_routing.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "entry_08_routing.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists
+  # Поднимаем awg0 и awg1
+    - vars: { bootstrap_step: "entry_09_enable_awg.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/forwarder/09_enable_awg.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "entry_09_enable_awg.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists

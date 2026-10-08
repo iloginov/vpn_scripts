@@ -1,0 +1,3 @@
+# Гайд (entry): «Настраиваем сеть и файрвол»
+---
+- ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/forwarder/07_network_firewall.yml"

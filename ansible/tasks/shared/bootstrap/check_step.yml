@@ -1,0 +1,13 @@
+# Проверка dot-флага шага. Требует vars: bootstrap_step
+---
+- ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/migrate_root_home.yml"
+
+- name: "bootstrap | check {{ bootstrap_step }}"
+  ansible.builtin.stat:
+    path: "{{ awg_bootstrap_state_dir }}/{{ bootstrap_step }}"
+  register: _bootstrap_step_done
+
+- name: "bootstrap | skip {{ bootstrap_step }} (already done)"
+  ansible.builtin.debug:
+    msg: "Шаг уже выполнен, пропуск: {{ bootstrap_step }}"
+  when: _bootstrap_step_done.stat.exists

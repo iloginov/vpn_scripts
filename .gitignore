@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+.pytest_cache/
+amneziawg_*/
+.DS_Store
+ansible/inventory/hosts.yml
+ansible/artifacts/*
+!ansible/artifacts/.gitignore
+clients_status.md
+tmp/

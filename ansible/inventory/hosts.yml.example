@@ -1,0 +1,47 @@
+# Скопируйте в hosts.yml и заполните IP (hosts.yml в .gitignore).
+#
+# Пара: оставьте middle.hosts пустым (как ниже) и запускайте bootstrap.yml.
+# Тройка: замените hosts: {} на хост, например:
+#
+#     middle:
+#       hosts:
+#         vpn_middle:
+#           ansible_host: 203.0.113.30
+#           ansible_user: ubuntu
+#           endpoint_host: 203.0.113.30
+#       vars:
+#         awg_subnet: 10.10.3.0/24
+#         server_name: "Middle 3.1"
+#
+# Живую пару → тройку: заполните middle и запускайте insert_middle.yml.
+# Playbook сам ходит на exit прыжком через middle (из страны exit уже может быть глух).
+# После удачной вставки допишите на vpn_exit, иначе следующие playbook
+# снова пойдут на exit напрямую и не зайдут:
+#
+#         ansible_ssh_common_args: '-o ProxyJump=ubuntu@203.0.113.30'
+---
+all:
+  children:
+    exit:
+      hosts:
+        vpn_exit:
+          ansible_host: 203.0.113.10
+          ansible_user: ubuntu
+      vars:
+        awg_subnet: 10.10.1.0/24
+        server_name: "Exit 3.1"
+        wan_interface: eth0
+    middle:
+      hosts: {}
+      vars:
+        awg_subnet: 10.10.3.0/24
+        server_name: "Middle 3.1"
+    entry:
+      hosts:
+        vpn_entry:
+          ansible_host: 203.0.113.20
+          ansible_user: ubuntu
+      vars:
+        awg_subnet: 10.10.2.0/24
+        server_name: "Russia 3.1"
+        endpoint_host: 203.0.113.20

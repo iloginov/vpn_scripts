@@ -1,0 +1,42 @@
+# Раньше каталог скриптов для root собирался как /home/root/awg.
+# Живые серверы с этим деревом переносим в /root/awg и оставляем
+# симлинк на старом пути, чтобы уже прописанные абсолютные пути не отвалились.
+---
+- name: move legacy /home/root/awg to /root/awg
+  when:
+    - ansible_user == 'root'
+    - not (awg_root_home_migrated | default(false) | bool)
+  ansible.builtin.shell: |
+    set -euo pipefail
+    legacy=/home/root/awg
+    canon=/root/awg
+    if [[ -L "$legacy" || ! -e "$legacy" ]]; then
+      echo moved=0
+      exit 0
+    fi
+    if [[ ! -d "$legacy" ]]; then
+      echo "ожидался каталог $legacy" >&2
+      exit 1
+    fi
+    if [[ -e "$canon" || -L "$canon" ]]; then
+      if [[ -d "$canon" && ! -L "$canon" && -z "$(ls -A "$canon")" ]]; then
+        rmdir "$canon"
+      else
+        echo "уже есть и $legacy, и непустой $canon — разберите вручную, нужен $canon" >&2
+        exit 1
+      fi
+    fi
+    mv "$legacy" "$canon"
+    ln -s "$canon" "$legacy"
+    echo moved=1
+  args:
+    executable: /bin/bash
+  register: _root_home_migrate
+  changed_when: "'moved=1' in (_root_home_migrate.stdout | default(''))"
+
+- name: remember root home migration
+  when:
+    - ansible_user == 'root'
+    - not (awg_root_home_migrated | default(false) | bool)
+  ansible.builtin.set_fact:
+    awg_root_home_migrated: true

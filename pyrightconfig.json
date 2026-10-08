@@ -1,0 +1,11 @@
+{
+  "include": ["awg_manage.py", "packages", "tests"],
+  "extraPaths": ["packages"],
+  "executionEnvironments": [
+    {
+      "root": ".",
+      "extraPaths": ["packages"],
+      "pythonVersion": "3.11"
+    }
+  ]
+}

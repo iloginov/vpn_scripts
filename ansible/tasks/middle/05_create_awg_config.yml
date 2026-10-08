@@ -1,0 +1,78 @@
+# Гайд (middle): init, policy routing, add entry, fetch client_entry.conf
+---
+- name: refuse if awg0 already configured
+  ansible.builtin.stat:
+    path: /etc/amnezia/amneziawg/awg0.conf
+  register: awg0_installed
+
+- name: stop if already bootstrapped
+  ansible.builtin.fail:
+    msg: >
+      /etc/amnezia/amneziawg/awg0.conf уже существует.
+      Повторный bootstrap не поддерживается.
+  when: awg0_installed.stat.exists
+
+- name: mkdir amneziawg_3_middle
+  ansible.builtin.file:
+    path: "{{ awg_output_dir_middle }}"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0755"
+
+- name: awg_manage init
+  ansible.builtin.shell: |
+    set -euo pipefail
+    cd "{{ awg_scripts_dir }}"
+    source .venv/bin/activate
+    python awg_manage.py init \
+      --listen-port {{ awg_listen_port }} \
+      --subnet {{ awg_subnet | quote }} \
+      --server-host {{ (endpoint_host | default(ansible_host)) | quote }} \
+      --server-name {{ server_name | quote }} \
+      --mtu {{ awg_mtu }} \
+      --dns {{ awg_dns | quote }} \
+      --mimic {{ awg_mimic | quote }} \
+      --intensity {{ awg_intensity | quote }} \
+      --junk-level {{ awg_junk_level }} \
+      --output-dir {{ awg_output_dir_middle | quote }}
+  args:
+    executable: /bin/bash
+  become_user: "{{ ansible_user }}"
+  changed_when: true
+
+- name: policy routing hooks in server_awg0.conf
+  ansible.builtin.lineinfile:
+    path: "{{ awg_output_dir_middle }}/server_awg0.conf"
+    line: "{{ item }}"
+    insertafter: EOF
+  loop:
+    - "PostUp = ip rule add from {{ awg_subnet }} table {{ clientroute_table_name }} 2>/dev/null || true"
+    - "PostUp = ip rule add iif awg0 table {{ clientroute_table_name }} 2>/dev/null || true"
+    - "PostUp = ip rule add to {{ awg_subnet }} table main prio 1000 2>/dev/null || true"
+    - "PostDown = ip rule del from {{ awg_subnet }} table {{ clientroute_table_name }} 2>/dev/null || true"
+    - "PostDown = ip rule del iif awg0 table {{ clientroute_table_name }} 2>/dev/null || true"
+    - "PostDown = ip rule del to {{ awg_subnet }} table main prio 1000 2>/dev/null || true"
+
+- name: awg_manage add entry peer
+  ansible.builtin.shell: |
+    set -euo pipefail
+    cd "{{ awg_scripts_dir }}"
+    source .venv/bin/activate
+    python awg_manage.py add \
+      --server-conf {{ (awg_output_dir_middle ~ '/server_awg0.conf') | quote }} \
+      --name {{ entry_peer_name | quote }} \
+      --mimic {{ awg_mimic | quote }} \
+      --intensity {{ awg_intensity | quote }} \
+      --junk-level {{ awg_junk_level }} \
+      --output-dir {{ awg_output_dir_middle | quote }}
+  args:
+    executable: /bin/bash
+  become_user: "{{ ansible_user }}"
+  changed_when: true
+
+- name: fetch client_entry.conf на control node
+  ansible.builtin.fetch:
+    src: "{{ awg_output_dir_middle }}/client_{{ entry_peer_name }}.conf"
+    dest: "{{ playbook_dir }}/../artifacts/client_{{ entry_peer_name }}.conf"
+    flat: true

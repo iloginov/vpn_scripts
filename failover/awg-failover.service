@@ -1,0 +1,12 @@
+[Unit]
+Description=AWG uplink failover
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/awg-failover -config /etc/awg-failover/config.yaml
+Restart=always
+RestartSec=2s
+
+[Install]
+WantedBy=multi-user.target

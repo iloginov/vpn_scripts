@@ -1,0 +1,18 @@
+# Список уже поднятых uplink. Сервис не создаёт интерфейсы и таблицы probeN:
+# адрес читает с интерфейса, проба уходит с него, потому что PostUp конфига
+# уже положил правило `from <адрес> lookup probeN`.
+interval: 15s
+route_table: clientroute
+probe_target: 1.1.1.1
+probe_timeout: 2s
+handshake_timeout: 90s
+fail_count: 3
+# Переход по задержке, только если разрыв не меньше max(30ms, 20% от текущей)
+# и держится improve_hold. Нулевые margin и ratio отключают переход по задержке.
+improve_margin: 30ms
+improve_ratio: 0.2
+improve_hold: 3m
+ema_alpha: 0.3
+uplinks:
+  - iface: awg1
+  - iface: awg2

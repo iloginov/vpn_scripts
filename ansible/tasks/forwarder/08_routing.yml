@@ -1,0 +1,8 @@
+# Общий шаг: rt_tables — clientroute
+---
+- name: rt_tables — clientroute
+  ansible.builtin.lineinfile:
+    path: /etc/iproute2/rt_tables
+    line: "{{ clientroute_table_id }} {{ clientroute_table_name }}"
+    regexp: "^\\s*{{ clientroute_table_id }}\\s+"
+    create: false

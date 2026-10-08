@@ -1,0 +1,30 @@
+# Гайд: «Вырубаем unattended updates»
+---
+- name: apt periodic update lists off
+  ansible.builtin.replace:
+    path: /etc/apt/apt.conf.d/20auto-upgrades
+    regexp: '^(APT::Periodic::Update-Package-Lists\s+)"1";'
+    replace: '\1"0";'
+
+- name: apt periodic unattended-upgrade off
+  ansible.builtin.replace:
+    path: /etc/apt/apt.conf.d/20auto-upgrades
+    regexp: '^(APT::Periodic::Unattended-Upgrade\s+)"1";'
+    replace: '\1"0";'
+
+- name: mask apt daily timers
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    masked: true
+    enabled: false
+    state: stopped
+  loop:
+    - apt-daily.timer
+    - apt-daily-upgrade.timer
+
+- name: mask unattended-upgrades service
+  ansible.builtin.systemd:
+    name: unattended-upgrades.service
+    masked: true
+    enabled: false
+    state: stopped

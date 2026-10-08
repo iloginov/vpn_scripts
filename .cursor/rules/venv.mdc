@@ -1,0 +1,5 @@
+---
+alwaysApply: true
+---
+
+All Python commands must be executed using the local virtual environment located at `.venv/bin/python` or by activating `.venv`.

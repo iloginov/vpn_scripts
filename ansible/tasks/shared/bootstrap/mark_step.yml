@@ -1,0 +1,9 @@
+# Пометить шаг выполненным. Требует vars: bootstrap_step
+---
+- name: "bootstrap | mark {{ bootstrap_step }} done"
+  ansible.builtin.file:
+    path: "{{ awg_bootstrap_state_dir }}/{{ bootstrap_step }}"
+    state: touch
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0644"

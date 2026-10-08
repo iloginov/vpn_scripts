@@ -1,0 +1,91 @@
+# Гайд: «Устанавливаем AmneziaWG»
+#
+# Ubuntu 24.04 (noble): amneziawg / amneziawg-dkms / amneziawg-tools из
+# ppa:amnezia/ppa. Проверено по .deb на 2026-09-04:
+#   amneziawg-tools 1.0.20210914-0~202608130144+ee0f0a9  → awg 3.1.20260812
+#     (RandomTrailers / DisableCookies / HeaderProtectionKey в бинарнике)
+#   amneziawg-dkms  1.0.0-0~202608282205+3c38e16         → модуль 3.1.20260812
+#     (random_trailers / disable_cookies в исходниках DKMS)
+# Номер apt 1.0.20210914 — упаковка; реальная версия в суффиксе хеша и в
+# `awg --version` / WIREGUARD_VERSION. state: latest, чтобы с 3.0 дотянуть 3.1.
+---
+- name: create ~/awg
+  ansible.builtin.file:
+    path: "{{ awg_scripts_dir }}"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0755"
+
+- name: create ~/awg/.vpn-bootstrap (dot-флаги)
+  ansible.builtin.file:
+    path: "{{ awg_bootstrap_state_dir }}"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0700"
+
+- name: install prerequisites
+  ansible.builtin.apt:
+    name:
+      - software-properties-common
+      - python3
+      - python-is-python3
+      - "linux-headers-{{ ansible_facts['kernel'] }}"
+    state: present
+
+- name: check amnezia PPA already added
+  ansible.builtin.find:
+    paths: /etc/apt/sources.list.d
+    patterns: "*amnezia*"
+  register: _amnezia_ppa_sources
+
+- name: add amnezia PPA
+  ansible.builtin.command:
+    cmd: add-apt-repository -y ppa:amnezia/ppa
+  when: _amnezia_ppa_sources.matched == 0
+  changed_when: true
+
+- name: install amneziawg packages
+  ansible.builtin.apt:
+    name:
+      - amneziawg
+      - amneziawg-dkms
+      - amneziawg-tools
+    state: latest
+    update_cache: true
+
+# grep -q закрывает pipe на первом совпадении → SIGPIPE (rc 141) при pipefail.
+- name: verify awg understands AWG 3.1 keys
+  ansible.builtin.shell: |
+    set -euo pipefail
+    strings "$(command -v awg)" | grep -E 'HeaderProtectionKey|RandomTrailers|DisableCookies'
+  args:
+    executable: /bin/bash
+  register: _awg31_keys
+  changed_when: false
+  failed_when: >
+    _awg31_keys.rc != 0
+    or ('HeaderProtectionKey' not in _awg31_keys.stdout)
+    or ('RandomTrailers' not in _awg31_keys.stdout)
+    or ('DisableCookies' not in _awg31_keys.stdout)
+
+- name: check .amneziawg-installed state
+  ansible.builtin.stat:
+    path: "{{ awg_bootstrap_state_dir }}/.amneziawg-installed"
+  register: amneziawg_installed_state
+
+- name: reboot after first amneziawg install
+  ansible.builtin.reboot:
+    msg: "Reboot after amneziawg-dkms install"
+    reboot_timeout: 600
+  when: not amneziawg_installed_state.stat.exists
+
+- name: set .amneziawg-installed state
+  ansible.builtin.file:
+    path: "{{ awg_bootstrap_state_dir }}/.amneziawg-installed"
+    state: touch
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0644"
+  when: not amneziawg_installed_state.stat.exists

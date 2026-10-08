@@ -1,0 +1,19 @@
+# Каталог для dot-флагов bootstrap — до любых шагов с state machine.
+---
+- ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/migrate_root_home.yml"
+
+- name: create ~/awg
+  ansible.builtin.file:
+    path: "{{ awg_scripts_dir }}"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0755"
+
+- name: create ~/awg/.vpn-bootstrap (mark files)
+  ansible.builtin.file:
+    path: "{{ awg_bootstrap_state_dir }}"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0700"

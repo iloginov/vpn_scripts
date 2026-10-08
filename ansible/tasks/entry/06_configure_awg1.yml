@@ -1,0 +1,7 @@
+# Гайд (entry): «Создаём конфиг» — awg1 из uplink-артефакта
+# Пара: client_transit.conf. Тройка: client_entry.conf.
+---
+- ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/forwarder/06_configure_awg1.yml"
+  vars:
+    awg_output_dir: "{{ awg_output_dir | default(awg_output_dir_entry) }}"
+    uplink_artifact: "{{ uplink_artifact | default(entry_uplink_artifact) }}"

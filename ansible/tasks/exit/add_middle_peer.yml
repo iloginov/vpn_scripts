@@ -1,0 +1,55 @@
+# Живая пара: добавить пир middle на уже поднятый exit (без re-init).
+---
+- name: ensure server_awg0.conf on exit
+  ansible.builtin.stat:
+    path: "{{ awg_output_dir_exit }}/server_awg0.conf"
+  register: exit_server_conf
+
+- name: need existing exit output dir
+  ansible.builtin.fail:
+    msg: >
+      Нет {{ awg_output_dir_exit }}/server_awg0.conf.
+      insert_middle рассчитан на exit после ansible bootstrap.
+  when: not exit_server_conf.stat.exists
+
+- name: awg_manage add middle peer
+  ansible.builtin.shell: |
+    set -euo pipefail
+    cd "{{ awg_scripts_dir }}"
+    source .venv/bin/activate
+    python awg_manage.py add \
+      --server-conf {{ (awg_output_dir_exit ~ '/server_awg0.conf') | quote }} \
+      --name {{ middle_peer_name | quote }} \
+      --mimic {{ awg_mimic | quote }} \
+      --intensity {{ awg_intensity | quote }} \
+      --junk-level {{ awg_junk_level }} \
+      --output-dir {{ awg_output_dir_exit | quote }}
+  args:
+    executable: /bin/bash
+  become_user: "{{ ansible_user }}"
+  changed_when: true
+
+- name: fetch client_middle.conf на control node
+  ansible.builtin.fetch:
+    src: "{{ awg_output_dir_exit }}/client_{{ middle_peer_name }}.conf"
+    dest: "{{ playbook_dir }}/../artifacts/{{ middle_uplink_artifact }}"
+    flat: true
+
+- name: cp server_awg0.conf → awg0.conf
+  ansible.builtin.copy:
+    src: "{{ awg_output_dir_exit }}/server_awg0.conf"
+    dest: /etc/amnezia/amneziawg/awg0.conf
+    remote_src: true
+    mode: "0600"
+
+- name: reload awg0 (syncconf или up)
+  ansible.builtin.shell: |
+    set -euo pipefail
+    if awg show awg0 >/dev/null 2>&1; then
+      awg syncconf awg0 <(awg-quick strip awg0)
+    else
+      awg-quick up awg0
+    fi
+  args:
+    executable: /bin/bash
+  changed_when: true
