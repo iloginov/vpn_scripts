@@ -9,6 +9,22 @@ aliases: ["deploy_transit", "Настройка транзитной ноды"]
 
 **Пара:** после exit — awg1 из `client_transit.conf`. **Тройка:** после middle — awg1 из `client_entry.conf`.
 
+**Развилка выхода.** Без второго сервера в РФ весь трафик клиентов идёт в `awg1`. Этот файл описывает именно так.
+
+```text
+без выхода через РФ:
+клиент → awg0 → clientroute → awg1 → exit или middle
+
+с выходом через РФ:
+клиент → awg0
+    ├── назначение в списке RU → ruroute → awg2 → сервер в РФ
+    └── остальное → clientroute → awg1 → exit или middle
+```
+
+Ветка «с выходом через РФ» — [deploy_entry_ru_exit.md](deploy_entry_ru_exit.md). С нуля: общие шаги этого файла до копирования `awg1` включительно, дальше тот документ, раздел «С нуля». Уже поднятый entry переводится тем же документом, раздел «Уже работающий entry». Ниже по тексту, где ветки расходятся, стоит отсылка.
+
+Файл политики для сборки файрвола скриптом: без РФ — [policy/entry.example.yaml](../policy/entry.example.yaml), с РФ — [policy/entry.ru.example.yaml](../policy/entry.ru.example.yaml). Поля разобраны в [deploy_entry_ru_exit.md](deploy_entry_ru_exit.md), раздел «Файл entry.yaml».
+
 ## Добавляем ключ SSH
 
 ```sh
@@ -179,6 +195,8 @@ sudo sysctl --system
 sysctl net.ipv4.ip_forward
 ```
 
+Ветка «с выходом через РФ» этот файл не использует: NAT и MSS есть ещё и на `awg2`, плюс include таблицы `awg_ru_split`. Файл и порядок включения — [deploy_entry_ru_exit.md](deploy_entry_ru_exit.md).
+
 ```
 sudo vim /etc/nftables.conf
 ```
@@ -259,6 +277,8 @@ sudo nft list ruleset
 
 ## Поднимаем интерфейсы
 
+Для ветки «с выходом через РФ» здесь поднять и включить только `awg1`. `awg0` первый раз поднимается уже с хуками из [deploy_entry_ru_exit.md](deploy_entry_ru_exit.md), после `awg2`.
+
 ```sh
 sudo awg-quick up awg0
 sudo systemctl enable awg-quick@awg0
@@ -268,6 +288,8 @@ sudo systemctl enable awg-quick@awg1
 ```
 
 ## Настраиваем маршрутизацию
+
+Ветка «с выходом через РФ» эти `ip rule` руками не добавляет. Там таблица `ruroute` и правила с приоритетами `1000` / `1100` / `2000` / `2010`, их ставят `PostUp`. См. [deploy_entry_ru_exit.md](deploy_entry_ru_exit.md).
 
 ```sh
 echo "100 clientroute" | sudo tee -a /etc/iproute2/rt_tables
@@ -280,6 +302,8 @@ sudo ip rule add to 10.10.2.0/24 table main prio 1000
 ```
 
 ## Добавляем PostUp и PostDown правила
+
+Ветка «с выходом через РФ» подставляет другой блок: те же три правила с явными `prio 2010` / `2000` / `1000` и четвёртое, `fwmark 0x100/0x100` → `ruroute` с `prio 1100`. Оба варианта — `PostDown`, не отдельный сервис. Блок и порядок `down`/`up` — [deploy_entry_ru_exit.md](deploy_entry_ru_exit.md).
 
 ```sh
 cd awg

@@ -2,7 +2,7 @@
 
 Документация: [docs/deploy_ansible.md](../docs/deploy_ansible.md).
 
-Ручные гайды: [deploy_exit.md](../docs/deploy_exit.md), [deploy_transit.md](../docs/deploy_transit.md), [deploy_middle.md](../docs/deploy_middle.md).
+Ручные гайды: [deploy_exit.md](../docs/deploy_exit.md), [deploy_transit.md](../docs/deploy_transit.md), [deploy_entry_ru_exit.md](../docs/deploy_entry_ru_exit.md), [deploy_middle.md](../docs/deploy_middle.md).
 
 ```bash
 cd ansible

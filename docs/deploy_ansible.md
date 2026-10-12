@@ -21,7 +21,7 @@ ansible/
     group_vars/all.yml
 ```
 
-Группа **`entry`** — транзит из [deploy_transit.md](deploy_transit.md) (клиенты на awg0, туннель awg1 на exit или middle).
+Группа **`entry`** — транзит из [deploy_transit.md](deploy_transit.md) (клиенты на awg0, туннель awg1 на exit или middle). Выход российских сетей через второй сервер bootstrap не делает; ручная ветка — [deploy_entry_ru_exit.md](deploy_entry_ru_exit.md).
 
 ## Требования
 

@@ -1,0 +1,36 @@
+# Entry с выходом российских сетей через второй сервер.
+# Повторный render заново забирает пулы и переписывает файлы. nft сам не запускает.
+client:
+  iface: awg0
+  subnet: 10.10.2.0/24
+  listen_port: 443
+
+# Основной канал: всё, что не помечено.
+uplink:
+  iface: awg1
+  table: clientroute
+  table_id: 100
+
+rules:
+  to_client_priority: 1000
+  iif_priority: 2000
+  from_priority: 2010
+
+# Выход по fwmark. Убери всю секцию — получится файрвол без сплита.
+ru_exit:
+  iface: awg2
+  table: ruroute
+  table_id: 101
+  fwmark: 0x100
+  priority: 1100
+  rules_path: /etc/awg-ru-split/rules.nft
+  pools:
+    # union — адрес российский, если он есть хотя бы в одном списке.
+    # intersection — только пересечение адресного пространства.
+    # first — только первый источник.
+    combine: union
+    sources:
+      - name: ipdeny
+        url: https://www.ipdeny.com/ipblocks/data/aggregated/ru-aggregated.zone
+      - name: ipverse
+        url: https://raw.githubusercontent.com/ipverse/country-ip-blocks/master/country/ru/ipv4-aggregated.txt

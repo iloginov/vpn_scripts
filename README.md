@@ -6,6 +6,7 @@
 |----------|----------|
 | [docs/deploy_exit.md](docs/deploy_exit.md) | Ручная настройка выходной ноды (NL) |
 | [docs/deploy_transit.md](docs/deploy_transit.md) | Ручная настройка транзитной ноды (RU, клиенты + awg1) |
+| [docs/deploy_entry_ru_exit.md](docs/deploy_entry_ru_exit.md) | Ветка entry: российские сети через второй сервер (`awg2`) |
 | [docs/deploy_middle.md](docs/deploy_middle.md) | Ручная настройка middle (тройка: entry → middle → exit) |
 | [docs/deploy_awg2_pair_middle.md](docs/deploy_awg2_pair_middle.md) | Пара 2.0: ansible поднимает middle и заново exit на 3.1, entry остаётся 2.0 |
 | [docs/deploy_ansible.md](docs/deploy_ansible.md) | Ansible: пара, тройка, insert_middle |
@@ -35,6 +36,14 @@ python awg_gen.py vpn-to-wg client.vpn -o client.conf
 ```
 
 Логика в `packages/amnezia_export/`.
+
+## Файрвол entry (`awg_policy.py`)
+
+Политика — yaml. Без секции `ru_exit` скрипт пишет файрвол пары. С секцией — тот же файрвол плюс второй канал и таблицу российских сетей из ipdeny и ipverse. В ruleset ничего не загружает. Примеры: [policy/entry.example.yaml](policy/entry.example.yaml), [policy/entry.ru.example.yaml](policy/entry.ru.example.yaml). Ручной порядок: [docs/deploy_entry_ru_exit.md](docs/deploy_entry_ru_exit.md).
+
+```shell
+python awg_policy.py render policy/entry.ru.example.yaml --dest /tmp/awg-policy
+```
 
 ## Ссылки
 

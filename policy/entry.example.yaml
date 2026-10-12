@@ -1,0 +1,16 @@
+# Entry без выхода через РФ. Секции ru_exit нет: второй интерфейс в файрвол не попадает,
+# списки сетей не качаются.
+client:
+  iface: awg0
+  subnet: 10.10.2.0/24
+  listen_port: 443
+
+uplink:
+  iface: awg1
+  table: clientroute
+  table_id: 100
+
+rules:
+  to_client_priority: 1000
+  iif_priority: 2000
+  from_priority: 2010
