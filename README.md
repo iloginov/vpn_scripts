@@ -9,7 +9,7 @@
 | [docs/deploy_entry_ru_exit.md](docs/deploy_entry_ru_exit.md) | Ветка entry: российские сети через второй сервер (`awg2`) |
 | [docs/deploy_middle.md](docs/deploy_middle.md) | Ручная настройка middle (тройка: entry → middle → exit) |
 | [docs/deploy_awg2_pair_middle.md](docs/deploy_awg2_pair_middle.md) | Пара 2.0: ansible поднимает middle и заново exit на 3.1, entry остаётся 2.0 |
-| [docs/deploy_ansible.md](docs/deploy_ansible.md) | Ansible: пара, тройка, insert_middle |
+| [docs/deploy_ansible.md](docs/deploy_ansible.md) | Ansible: пара, тройка, insert_middle, российский выход |
 | [docs/awg2_protocol_params.md](docs/awg2_protocol_params.md) | Параметры AmneziaWG 2.0 (H/S/I, Jc/Jmin/Jmax), мимикрия |
 | [docs/awg3_protocol_params.md](docs/awg3_protocol_params.md) | Параметры AmneziaWG 3.0/3.1 (HPK, padding, RandomTrailers) |
 | [docs/xray_plan.md](docs/xray_plan.md) | План AWG + Xray/VLESS+Reality на одной паре (не внедрение) |

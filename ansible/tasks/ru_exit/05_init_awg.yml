@@ -1,0 +1,43 @@
+# Российская выходная нода: init без пира.
+# Пиры entry добавляет playbooks/add_ru_exit.yml.
+---
+- name: refuse if awg0 already configured
+  ansible.builtin.stat:
+    path: /etc/amnezia/amneziawg/awg0.conf
+  register: awg0_installed
+
+- name: stop if already bootstrapped
+  ansible.builtin.fail:
+    msg: >
+      /etc/amnezia/amneziawg/awg0.conf уже существует.
+      Повторный bootstrap не поддерживается.
+  when: awg0_installed.stat.exists
+
+- name: mkdir amneziawg_3_exit
+  ansible.builtin.file:
+    path: "{{ awg_output_dir_exit }}"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0755"
+
+- name: awg_manage init
+  ansible.builtin.shell: |
+    set -euo pipefail
+    cd "{{ awg_scripts_dir }}"
+    source .venv/bin/activate
+    python awg_manage.py init \
+      --listen-port {{ awg_listen_port }} \
+      --subnet {{ awg_subnet | quote }} \
+      --server-host {{ (endpoint_host | default(ansible_host)) | quote }} \
+      --server-name {{ server_name | quote }} \
+      --mtu {{ awg_mtu }} \
+      --dns {{ awg_dns | quote }} \
+      --mimic {{ awg_mimic | quote }} \
+      --intensity {{ awg_intensity | quote }} \
+      --junk-level {{ awg_junk_level }} \
+      --output-dir {{ awg_output_dir_exit | quote }}
+  args:
+    executable: /bin/bash
+  become_user: "{{ ansible_user }}"
+  changed_when: true

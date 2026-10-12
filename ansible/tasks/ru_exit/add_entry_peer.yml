@@ -1,0 +1,65 @@
+# Пир одного entry на уже поднятой российской ноде.
+# Ожидает entry_host из loop_control.
+---
+- name: имя пира этого entry
+  ansible.builtin.set_fact:
+    ru_peer_name: >-
+      {{
+        hostvars[entry_host].ru_peer_name
+        if 'ru_peer_name' in hostvars[entry_host]
+        else entry_host
+      }}
+
+- name: "имя пира {{ ru_peer_name }}"
+  ansible.builtin.assert:
+    that:
+      - ru_peer_name is match('^[A-Za-z0-9_-]+$')
+    fail_msg: "ru_peer_name {{ ru_peer_name }} — только буквы, цифры, _ и -."
+
+- name: "клиентский конфиг {{ ru_peer_name }} уже есть"
+  ansible.builtin.stat:
+    path: "{{ awg_output_dir_exit }}/client_{{ ru_peer_name }}.conf"
+  register: ru_client_conf
+
+- name: "awg_manage add {{ ru_peer_name }}"
+  ansible.builtin.shell: |
+    set -euo pipefail
+    cd "{{ awg_scripts_dir }}"
+    source .venv/bin/activate
+    python awg_manage.py add \
+      --server-conf {{ (awg_output_dir_exit ~ '/server_awg0.conf') | quote }} \
+      --name {{ ru_peer_name | quote }} \
+      --mimic {{ awg_mimic | quote }} \
+      --intensity {{ awg_intensity | quote }} \
+      --junk-level {{ awg_junk_level }} \
+      --output-dir {{ awg_output_dir_exit | quote }}
+  args:
+    executable: /bin/bash
+  become_user: "{{ ansible_user }}"
+  when: not ru_client_conf.stat.exists
+  changed_when: true
+
+- name: "fetch client_{{ ru_peer_name }}.conf"
+  ansible.builtin.fetch:
+    src: "{{ awg_output_dir_exit }}/client_{{ ru_peer_name }}.conf"
+    dest: "{{ playbook_dir }}/../artifacts/client_{{ ru_peer_name }}.conf"
+    flat: true
+
+- name: cp server_awg0.conf → awg0.conf
+  ansible.builtin.copy:
+    src: "{{ awg_output_dir_exit }}/server_awg0.conf"
+    dest: /etc/amnezia/amneziawg/awg0.conf
+    remote_src: true
+    mode: "0600"
+
+- name: reload awg0 (syncconf или up)
+  ansible.builtin.shell: |
+    set -euo pipefail
+    if awg show awg0 >/dev/null 2>&1; then
+      awg syncconf awg0 <(awg-quick strip awg0)
+    else
+      awg-quick up awg0
+    fi
+  args:
+    executable: /bin/bash
+  changed_when: true

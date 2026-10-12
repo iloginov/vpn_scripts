@@ -1,0 +1,91 @@
+# Поднять российскую выходную ноду: клиенты этой ноды выходят в интернет с её адреса.
+# Пиров ещё нет. Entry подключает playbooks/add_ru_exit.yml.
+#
+# Подсеть не должна совпадать с подсетью клиентов entry и не должна содержать адрес awg1.
+#
+#   cd ansible
+#   ansible-playbook -i inventory/hosts.yml playbooks/bootstrap_ru_exit.yml
+
+- name: Preflight — одна российская выходная нода
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  tasks:
+    - name: нужен хост в группе ru_exit
+      ansible.builtin.fail:
+        msg: >
+          bootstrap_ru_exit.yml нужен один хост в группе ru_exit.
+          Добавьте его в inventory/hosts.yml.
+      when: groups['ru_exit'] | default([]) | length != 1
+
+    - name: у ru_exit заданы подсеть, имя и WAN
+      ansible.builtin.assert:
+        that:
+          - hostvars[groups['ru_exit'][0]].awg_subnet is defined
+          - hostvars[groups['ru_exit'][0]].server_name is defined
+          - hostvars[groups['ru_exit'][0]].wan_interface is defined
+        fail_msg: "У ru_exit нужны awg_subnet, server_name и wan_interface."
+
+- name: Base setup (ru_exit)
+  hosts: ru_exit
+  become: true
+  handlers:
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../handlers/main.yml"
+  tasks:
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/00_bootstrap_init.yml"
+    - vars: { bootstrap_step: "shared_01_ssh_fail2ban.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/01_ssh_fail2ban.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "shared_01_ssh_fail2ban.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "shared_02_unattended_updates.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/02_unattended_updates.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "shared_02_unattended_updates.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "shared_03_install_amneziawg.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/03_install_amneziawg.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "shared_03_install_amneziawg.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "shared_04_deploy_awg_scripts.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/04_deploy_awg_scripts.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "shared_04_deploy_awg_scripts.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists
+
+- name: Russian exit node
+  hosts: ru_exit
+  become: true
+  handlers:
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../handlers/main.yml"
+  tasks:
+    - vars: { bootstrap_step: "ru_exit_05_init_awg.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/ru_exit/05_init_awg.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "ru_exit_05_init_awg.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "ru_exit_06_network_firewall.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/exit/06_network_firewall.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "ru_exit_06_network_firewall.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "ru_exit_07_enable_awg0.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/exit/07_enable_awg0.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "ru_exit_07_enable_awg0.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists

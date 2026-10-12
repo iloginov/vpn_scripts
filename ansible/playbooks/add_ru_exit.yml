@@ -1,0 +1,78 @@
+# Подключить уже работающий entry к российской выходной ноде.
+# Клиенты awg0 не переподключаются: awg0 и awg1 не опускаются.
+# Старые правила clientroute остаются. Добавляется правило метки 1100.
+#
+# Сначала bootstrap_ru_exit.yml. Подсеть ru_exit не должна совпадать с подсетью entry.
+# Несколько entry в одном inventory обрабатываются по очереди.
+# Если один ru_exit обслуживает несколько пар, у каждого entry свой ru_peer_name.
+#
+#   cd ansible
+#   ansible-playbook -i inventory/hosts.yml playbooks/add_ru_exit.yml
+
+- name: Preflight — ru_exit и entry
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  tasks:
+    - name: нужен один ru_exit
+      ansible.builtin.fail:
+        msg: "add_ru_exit.yml нужен один хост в группе ru_exit."
+      when: groups['ru_exit'] | default([]) | length != 1
+
+    - name: нужен entry
+      ansible.builtin.fail:
+        msg: "add_ru_exit.yml нужен хотя бы один хост в группе entry."
+      when: groups['entry'] | default([]) | length == 0
+
+- name: Preflight — живой entry
+  hosts: entry
+  become: true
+  tasks:
+    - name: awg0 must already exist
+      ansible.builtin.stat:
+        path: /etc/amnezia/amneziawg/awg0.conf
+      register: awg0_installed
+
+    - name: refuse if entry not bootstrapped
+      ansible.builtin.fail:
+        msg: >
+          На {{ inventory_hostname }} нет /etc/amnezia/amneziawg/awg0.conf.
+          Сначала bootstrap пары или тройки.
+      when: not awg0_installed.stat.exists
+
+- name: Peer per entry on Russian exit
+  hosts: ru_exit
+  become: true
+  tasks:
+    - name: российская нода уже поднята
+      ansible.builtin.stat:
+        path: "{{ awg_output_dir_exit }}/server_awg0.conf"
+      register: ru_server_conf
+
+    - name: сначала bootstrap_ru_exit
+      ansible.builtin.fail:
+        msg: >
+          Нет {{ awg_output_dir_exit }}/server_awg0.conf.
+          Сначала playbooks/bootstrap_ru_exit.yml.
+      when: not ru_server_conf.stat.exists
+
+    - name: пир каждого entry
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../tasks/ru_exit/add_entry_peer.yml"
+      loop: "{{ groups['entry'] }}"
+      loop_control:
+        loop_var: entry_host
+
+- name: Split on entry
+  hosts: entry
+  become: true
+  serial: 1
+  handlers:
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../handlers/main.yml"
+  tasks:
+    - vars: { bootstrap_step: "entry_add_ru_split.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/check_step.yml"
+    - ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/entry/add_ru_split.yml"
+      when: not _bootstrap_step_done.stat.exists
+    - vars: { bootstrap_step: "entry_add_ru_split.done" }
+      ansible.builtin.import_tasks: "{{ playbook_dir }}/../tasks/shared/bootstrap/mark_step.yml"
+      when: not _bootstrap_step_done.stat.exists

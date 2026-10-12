@@ -1,0 +1,240 @@
+# Живой entry: awg2 на российскую ноду и сплит, без down awg0.
+# Старые правила clientroute (без явного приоритета) не переписываются.
+# Добавляется только fwmark → ruroute. nft грузится после этого правила и handshake awg2.
+# Артефакт client_<имя>.conf уже на control node.
+# Имя пира — ru_peer_name в host vars, иначе inventory_hostname.
+---
+- name: имя пира на российском выходе
+  ansible.builtin.set_fact:
+    entry_ru_peer: >-
+      {{
+        hostvars[inventory_hostname].ru_peer_name
+        if 'ru_peer_name' in hostvars[inventory_hostname]
+        else inventory_hostname
+      }}
+
+- name: подсеть entry не совпадает с подсетью российского выхода
+  ansible.builtin.assert:
+    that:
+      - hostvars[groups['ru_exit'][0]].awg_subnet != awg_subnet
+    fail_msg: >
+      awg_subnet entry и ru_exit совпадают ({{ awg_subnet }}).
+      У российского выхода должна быть своя подсеть, например 10.10.4.0/24.
+
+- name: есть server_awg0.conf entry
+  ansible.builtin.stat:
+    path: "{{ awg_output_dir_entry }}/server_awg0.conf"
+  register: entry_server_conf
+
+- name: entry собран ansible
+  ansible.builtin.fail:
+    msg: >
+      Нет {{ awg_output_dir_entry }}/server_awg0.conf.
+      add_ru_exit рассчитан на entry после ansible bootstrap.
+  when: not entry_server_conf.stat.exists
+
+- name: артефакт awg2 на control node
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/../artifacts/client_{{ entry_ru_peer }}.conf"
+  delegate_to: localhost
+  become: false
+  register: ru_artifact
+
+- name: нет клиентского конфига с российской ноды
+  ansible.builtin.fail:
+    msg: "Нет artifacts/client_{{ entry_ru_peer }}.conf — сначала пир на ru_exit."
+  when: not ru_artifact.stat.exists
+
+- name: awg2.conf уже лежит на entry
+  ansible.builtin.stat:
+    path: /etc/amnezia/amneziawg/awg2.conf
+  register: awg2_installed
+
+- name: в существующем awg2.conf маршрут ruroute
+  ansible.builtin.command:
+    cmd: grep -q 'table {{ ruroute_table_name }}' /etc/amnezia/amneziawg/awg2.conf
+  register: awg2_ours
+  changed_when: false
+  failed_when: false
+  when: awg2_installed.stat.exists
+
+- name: чужой awg2 не переписываем
+  ansible.builtin.fail:
+    msg: >
+      На {{ inventory_hostname }} уже есть /etc/amnezia/amneziawg/awg2.conf
+      без маршрута в {{ ruroute_table_name }}. add_ru_exit его не трогает.
+  when:
+    - awg2_installed.stat.exists
+    - (awg2_ours.rc | default(0)) != 0
+
+- name: rt_tables — ruroute
+  ansible.builtin.lineinfile:
+    path: /etc/iproute2/rt_tables
+    line: "{{ ruroute_table_id }} {{ ruroute_table_name }}"
+    regexp: "^\\s*{{ ruroute_table_id }}\\s+"
+
+- name: cp client conf → awg2.conf в каталоге entry
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../artifacts/client_{{ entry_ru_peer }}.conf"
+    dest: "{{ awg_output_dir_entry }}/awg2.conf"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0600"
+
+- name: awg2 — закомментировать DNS
+  ansible.builtin.replace:
+    path: "{{ awg_output_dir_entry }}/awg2.conf"
+    regexp: '(?m)^(DNS\s*=.*)$'
+    replace: '# \1'
+
+- name: awg2 — Table = off и маршрут ruroute
+  ansible.builtin.lineinfile:
+    path: "{{ awg_output_dir_entry }}/awg2.conf"
+    line: "{{ item }}"
+    insertbefore: '^\[Peer\]'
+  loop:
+    - "Table = off"
+    - "PostUp = ip route add default dev awg2 table {{ ruroute_table_name }} 2>/dev/null || true"
+    - "PostDown = ip route del default dev awg2 table {{ ruroute_table_name }} 2>/dev/null || true"
+
+- name: cp awg2.conf в /etc
+  ansible.builtin.copy:
+    src: "{{ awg_output_dir_entry }}/awg2.conf"
+    dest: /etc/amnezia/amneziawg/awg2.conf
+    remote_src: true
+    mode: "0600"
+
+- name: awg-quick up awg2
+  ansible.builtin.command:
+    cmd: awg-quick up awg2
+  register: awg2_up
+  changed_when: "'already exists' not in (awg2_up.stderr | default(''))"
+  failed_when: >
+    awg2_up.rc != 0 and ('already exists' not in (awg2_up.stderr | default('')))
+
+- name: systemctl enable awg-quick@awg2
+  ansible.builtin.systemd:
+    name: awg-quick@awg2
+    enabled: true
+
+- name: в ruroute есть default через awg2
+  ansible.builtin.command:
+    cmd: ip -4 route show table {{ ruroute_table_name }}
+  register: ruroute_routes
+  changed_when: false
+  failed_when: "'default' not in ruroute_routes.stdout or 'awg2' not in ruroute_routes.stdout"
+
+- name: дождаться handshake awg2
+  ansible.builtin.command:
+    cmd: awg show awg2 latest-handshakes
+  register: awg2_handshake
+  changed_when: false
+  retries: 15
+  delay: 2
+  until: awg2_handshake.stdout is search("\t[1-9]")
+
+- name: хук метки в server_awg0.conf и в живом awg0.conf
+  ansible.builtin.lineinfile:
+    path: "{{ item.path }}"
+    line: "{{ item.line }}"
+    insertbefore: '^\[Peer\]'
+  loop:
+    - path: "{{ awg_output_dir_entry }}/server_awg0.conf"
+      line: "PostUp = ip rule add fwmark {{ ru_fwmark }}/{{ ru_fwmark }} iif awg0 lookup {{ ruroute_table_name }} prio {{ ru_rule_priority }} 2>/dev/null || true"
+    - path: "{{ awg_output_dir_entry }}/server_awg0.conf"
+      line: "PostDown = ip rule del fwmark {{ ru_fwmark }}/{{ ru_fwmark }} iif awg0 lookup {{ ruroute_table_name }} prio {{ ru_rule_priority }} 2>/dev/null || true"
+    - path: /etc/amnezia/amneziawg/awg0.conf
+      line: "PostUp = ip rule add fwmark {{ ru_fwmark }}/{{ ru_fwmark }} iif awg0 lookup {{ ruroute_table_name }} prio {{ ru_rule_priority }} 2>/dev/null || true"
+    - path: /etc/amnezia/amneziawg/awg0.conf
+      line: "PostDown = ip rule del fwmark {{ ru_fwmark }}/{{ ru_fwmark }} iif awg0 lookup {{ ruroute_table_name }} prio {{ ru_rule_priority }} 2>/dev/null || true"
+
+- name: правило метки сейчас, без перезапуска awg0
+  ansible.builtin.shell: |
+    set -euo pipefail
+    ip -4 rule add fwmark {{ ru_fwmark }}/{{ ru_fwmark }} iif awg0 lookup {{ ruroute_table_name }} prio {{ ru_rule_priority }} 2>/dev/null || true
+    ip -4 rule show | grep -q 'fwmark {{ ru_fwmark }}/{{ ru_fwmark }}'
+  args:
+    executable: /bin/bash
+  changed_when: true
+
+- name: venv со скриптом политики на control node
+  ansible.builtin.stat:
+    path: "{{ vpn_repo_root }}/.venv/bin/python"
+  delegate_to: localhost
+  become: false
+  register: policy_python
+
+- name: нужен .venv репозитория
+  ansible.builtin.fail:
+    msg: >
+      Нет {{ vpn_repo_root }}/.venv. На ноутбуке: python -m venv .venv &&
+      .venv/bin/pip install -r requirements.txt
+  when: not policy_python.stat.exists
+
+- name: entry.yaml для render
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/entry-policy.yaml.j2"
+    dest: "{{ playbook_dir }}/../artifacts/ru-split-{{ inventory_hostname }}.yaml"
+    mode: "0644"
+  delegate_to: localhost
+  become: false
+
+- name: awg_policy render
+  ansible.builtin.command:
+    cmd: >-
+      {{ vpn_repo_root }}/.venv/bin/python
+      {{ vpn_repo_root }}/awg_policy.py render
+      {{ playbook_dir }}/../artifacts/ru-split-{{ inventory_hostname }}.yaml
+      --dest {{ playbook_dir }}/../artifacts/ru-split-{{ inventory_hostname }}
+  delegate_to: localhost
+  become: false
+  changed_when: true
+
+- name: каталог awg-ru-split
+  ansible.builtin.file:
+    path: /etc/awg-ru-split
+    state: directory
+    mode: "0755"
+
+- name: rules.nft на entry
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../artifacts/ru-split-{{ inventory_hostname }}/rules.nft"
+    dest: /etc/awg-ru-split/rules.nft
+    mode: "0644"
+
+- name: nftables.conf
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../artifacts/ru-split-{{ inventory_hostname }}/nftables.conf"
+    dest: /etc/nftables.conf
+    mode: "0644"
+    validate: /usr/sbin/nft -c -f %s
+
+- name: включить nftables и применить ruleset
+  ansible.builtin.systemd:
+    name: nftables
+    enabled: true
+
+- name: nft -f
+  ansible.builtin.command:
+    cmd: nft -f /etc/nftables.conf
+  changed_when: true
+
+- name: drop-in порядка старта awg0
+  ansible.builtin.file:
+    path: /etc/systemd/system/awg-quick@awg0.service.d
+    state: directory
+    mode: "0755"
+
+- name: awg0 после awg1, awg2 и nftables
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/awg-quick@awg0.service.d/10-routing.conf
+    mode: "0644"
+    content: |
+      [Unit]
+      After=nftables.service awg-quick@awg1.service awg-quick@awg2.service
+      Wants=awg-quick@awg1.service awg-quick@awg2.service
+
+- name: systemctl daemon-reload
+  ansible.builtin.command:
+    cmd: systemctl daemon-reload
+  changed_when: true

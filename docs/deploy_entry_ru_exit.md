@@ -5,7 +5,9 @@ aliases: ["deploy_entry_ru_exit", "Выход через РФ"]
 ---
 # Выход российских сетей через второй сервер
 
-Ручное добавление к entry, который уже работает по [deploy_transit.md](deploy_transit.md). Тот же порядок — ветка «с выходом через РФ» при настройке entry с нуля. Ansible этого пока не делает.
+Ручное добавление к entry, который уже работает по [deploy_transit.md](deploy_transit.md). Тот же порядок — ветка «с выходом через РФ» при настройке entry с нуля.
+
+Ansible: [deploy_ansible.md](deploy_ansible.md). `bootstrap_ru_exit.yml` поднимает российский выход, `add_ru_exit.yml` подключает уже работающий entry. Playbook не опускает `awg0` и дописывает в него только правило метки `1100`. Раздел «Уже работающий entry» ниже — ручная замена всех хуков, она как раз опускает `awg0`.
 
 Клиентские конфиги не перевыпускаются. `awg1` и таблица `clientroute` остаются путём для всего, что не попало в список российских сетей.
 
@@ -403,18 +405,16 @@ sudo awg-quick up awg0
 
 `ip -4 rule show` снова как у пары без РФ: `1000`, затем `clientroute` около `32764` / `32765`. Строку `101 ruroute` в `rt_tables` можно оставить.
 
-## Что повторит ansible
+## Что делает ansible
 
-Отдельного юнита для `ip rule` в плейбуке не будет.
+Два отдельных playbook, не `bootstrap.yml`. Подробности и команды — [deploy_ansible.md](deploy_ansible.md).
 
-Развилка — флаг entry, условно `ru_exit`. Без него задачи те же, что сейчас.
+`bootstrap_ru_exit.yml` поднимает пустую российскую ноду: init без пира, тот же файрвол, что у обычного exit, `awg0` в автозапуске. Пиры entry появляются позже.
 
-С флагом:
+`add_ru_exit.yml` подключает уже работающий entry и `awg0` не опускает:
 
-- в `rt_tables` добавляется `101 ruroute`;
-- `awg_policy.py render` по этому yaml пишет `nftables.conf`, `rules.nft` и хуки;
-- хуки `awg0` — четыре пары `PostUp` / `PostDown` из `hooks/awg0.hooks`;
-- `awg2` собирается из артефакта `client_ru.conf` тем же приёмом, что `awg1`: закомментировать `DNS`, `Table = off`, default в `ruroute`;
-- `awg-quick@awg2` в автозапуске, drop-in порядка старта у `awg0`.
-
-Плейбук добавления на живой entry повторяет раздел «Уже работающий entry»: не делает `init`, опускает `awg0` со старыми хуками, потом ставит новые.
+- на российском выходе — пир с именем `ru_peer_name` или `inventory_hostname`, затем `awg syncconf`;
+- на entry — `awg2` с default в `ruroute`, и дальше только после handshake;
+- в оба `awg0.conf` дописываются `PostUp` / `PostDown` метки `1100`, то же правило ставится сразу `ip rule add`;
+- старые правила `clientroute` без явного приоритета не переписываются. Файл `hooks/awg0.hooks` на живой entry не ставится: в нём приоритеты `2000` / `2010`, их ставят только при сборке с нуля, и для этого нужен `down`;
+- `awg_policy.py render` на ноутбуке пишет `nftables.conf` и `rules.nft`. `nft -f` — после правила `1100` и handshake, иначе `forward_guard` уронит текущий российский трафик, который ещё идёт в `awg1`.

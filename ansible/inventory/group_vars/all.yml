@@ -34,3 +34,11 @@ entry_uplink_artifact: "{{ ('client_' ~ entry_peer_name ~ '.conf') if (groups['m
 
 clientroute_table_id: 100
 clientroute_table_name: clientroute
+
+# Сплит российских сетей: метка раньше правил clientroute (~32764).
+ruroute_table_id: 101
+ruroute_table_name: ruroute
+ru_fwmark: "0x100"
+ru_rule_priority: 1100
+ru_iif_priority: 2000
+ru_from_priority: 2010

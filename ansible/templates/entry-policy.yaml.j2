@@ -1,0 +1,29 @@
+client:
+  iface: awg0
+  subnet: {{ awg_subnet }}
+  listen_port: {{ awg_listen_port }}
+
+uplink:
+  iface: awg1
+  table: {{ clientroute_table_name }}
+  table_id: {{ clientroute_table_id }}
+
+rules:
+  to_client_priority: 1000
+  iif_priority: {{ ru_iif_priority }}
+  from_priority: {{ ru_from_priority }}
+
+ru_exit:
+  iface: awg2
+  table: {{ ruroute_table_name }}
+  table_id: {{ ruroute_table_id }}
+  fwmark: {{ ru_fwmark }}
+  priority: {{ ru_rule_priority }}
+  rules_path: /etc/awg-ru-split/rules.nft
+  pools:
+    combine: union
+    sources:
+      - name: ipdeny
+        url: https://www.ipdeny.com/ipblocks/data/aggregated/ru-aggregated.zone
+      - name: ipverse
+        url: https://raw.githubusercontent.com/ipverse/country-ip-blocks/master/country/ru/ipv4-aggregated.txt

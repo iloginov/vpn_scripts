@@ -6,8 +6,10 @@
 
 ```
 ansible/
-  playbooks/bootstrap.yml       # exit → (middle) → entry
-  playbooks/insert_middle.yml   # живая пара → тройка
+  playbooks/bootstrap.yml         # exit → (middle) → entry
+  playbooks/insert_middle.yml     # живая пара → тройка
+  playbooks/bootstrap_ru_exit.yml # пустая российская выходная нода
+  playbooks/add_ru_exit.yml       # живой entry → сплит через эту ноду
   tasks/
     shared/…
     exit/05_create_awg_config.yml … 07_enable_awg0.yml, add_middle_peer.yml
@@ -21,7 +23,7 @@ ansible/
     group_vars/all.yml
 ```
 
-Группа **`entry`** — транзит из [deploy_transit.md](deploy_transit.md) (клиенты на awg0, туннель awg1 на exit или middle). Выход российских сетей через второй сервер bootstrap не делает; ручная ветка — [deploy_entry_ru_exit.md](deploy_entry_ru_exit.md).
+Группа **`entry`** — транзит из [deploy_transit.md](deploy_transit.md) (клиенты на awg0, туннель awg1 на exit или middle). Выход российских сетей через второй сервер `bootstrap.yml` не делает. Для этого группа **`ru_exit`** и два playbook ниже; ручной порядок — [deploy_entry_ru_exit.md](deploy_entry_ru_exit.md).
 
 ## Требования
 
@@ -90,6 +92,11 @@ ansible-playbook -i inventory/hosts.yml playbooks/bootstrap.yml \
 | `entry` | `awg_subnet` | Подсеть клиентов (напр. `10.10.2.0/24`) |
 | `entry` | `endpoint_host` | Публичный IP transit для `--server-host` |
 | `entry` | `server_name` | Имя сервера в конфигах |
+| `entry` | `ru_peer_name` | Имя пира этого entry на `ru_exit`. Без неё — `inventory_hostname` |
+| `ru_exit` | `awg_subnet` | Подсеть awg0 российского выхода (напр. `10.10.4.0/24`) |
+| `ru_exit` | `wan_interface` | WAN для nftables |
+| `ru_exit` | `server_name` | Имя сервера в конфигах |
+| `ru_exit` | `endpoint_host` | Публичный адрес в Endpoint пиров entry; иначе `ansible_host` |
 
 Общие параметры AWG (порт 443, MTU, mimic) и имена пиров — в `group_vars/all.yml`. Каталог скриптов — `~/awg`: у обычного пользователя `/home/<user>/awg`, у root `/root/awg`. Если root уже развёрнут в `/home/root/awg`, следующий прогон playbook переносит дерево в `/root/awg` и оставляет симлинк на старом пути.
 
@@ -133,6 +140,25 @@ ansible_ssh_common_args: '-o ProxyJump=<user>@<middle_ip>'
 Повторный полный bootstrap по-прежнему запрещён, если `/etc/amnezia/amneziawg/awg0.conf` уже есть. Для пары, уже поднятой этим ansible на 3.1, insert — путь «пара → тройка» без сноса клиентов.
 
 Пара на AmneziaWG 2.0 этим playbook не переводится: insert положит на entry клиент с полями 3.1. Для неё отдельный прогон `bootstrap.yml --limit exit:middle` после сноса exit и ручная чистка полей на middle: [deploy_awg2_pair_middle.md](deploy_awg2_pair_middle.md).
+
+## Российский выход
+
+Два playbook, по очереди. `bootstrap.yml` их не вызывает.
+
+Российская нода — обычный exit: NAT своей подсети в интернет. Пира `transit` или `middle` у неё нет. Клиенты этой ноды — entry, их добавляет второй playbook. Подсеть не совпадает с подсетью клиентов entry (в примере `10.10.4.0/24` и `10.10.2.0/24`).
+
+1. Хост в группе `ru_exit`: `ansible_host`, `ansible_user`, `awg_subnet`, `server_name`, `wan_interface`. `endpoint_host` — публичный адрес, который попадёт в Endpoint пира; без него берётся `ansible_host`.
+2. `ansible-playbook -i inventory/hosts.yml playbooks/bootstrap_ru_exit.yml`
+3. На каждом entry, который надо подключить, при необходимости `ru_peer_name`. Имя пира на российском выходе: эта переменная, иначе `inventory_hostname`. Буквы, цифры, `_` и `-`. Один `ru_exit` на несколько пар — имена не повторяются.
+4. `ansible-playbook -i inventory/hosts.yml playbooks/add_ru_exit.yml`
+
+`add_ru_exit.yml` не делает `down awg0` и не перезапускает `awg1`. Старые правила `clientroute` (без явного приоритета, около `32764` / `32765`) остаются. Добавляется правило `fwmark 0x100/0x100` с приоритетом `1100`: оно смотрится раньше них. `nft -f` выполняется после handshake `awg2` и после этого правила. Несколько entry в одном inventory обрабатываются по одному.
+
+Повторный запуск пропускает уже отмеченные шаги (`~/awg/.vpn-bootstrap/`). Пир на российском выходе второй раз не создаётся, если файл `client_<имя>.conf` уже есть. Если `awg2.conf` на entry уже есть и в нём нет маршрута `ruroute`, playbook останавливается.
+
+На ноутбуке для render нужен `.venv` репозитория (`python -m venv .venv && .venv/bin/pip install -r requirements.txt`). Скрипт качает списки RU с ipdeny и ipverse.
+
+Ручная сборка с нуля по-прежнему ставит в `awg0` все четыре пары хуков, включая приоритеты `2000` и `2010`, и для этого опускает `awg0`. На живой entry playbook этого не делает.
 
 ## Повторный запуск bootstrap
 

@@ -15,6 +15,11 @@ ansible-playbook -i inventory/hosts.yml playbooks/bootstrap.yml
 # допишите ansible_ssh_common_args ProxyJump на vpn_exit (см. hosts.yml.example).
 ansible-playbook -i inventory/hosts.yml playbooks/insert_middle.yml
 
+# российский выход, затем подключение уже работающего entry.
+# awg0 при подключении не опускается. См. docs/deploy_ansible.md.
+ansible-playbook -i inventory/hosts.yml playbooks/bootstrap_ru_exit.yml
+ansible-playbook -i inventory/hosts.yml playbooks/add_ru_exit.yml
+
 # пара AmneziaWG 2.0 → middle и заново exit на 3.1, entry не трогать:
 # docs/deploy_awg2_pair_middle.md
 ```

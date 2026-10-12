@@ -19,6 +19,23 @@
 # снова пойдут на exit напрямую и не зайдут:
 #
 #         ansible_ssh_common_args: '-o ProxyJump=ubuntu@203.0.113.30'
+#
+# Российский выход — отдельная группа ru_exit, не middle и не exit пары.
+# Сначала playbooks/bootstrap_ru_exit.yml, затем playbooks/add_ru_exit.yml.
+# Подсеть своя: не подсеть клиентов entry и не подсеть awg1.
+# Несколько entry на один ru_exit: у каждого entry свой ru_peer_name
+# (буквы, цифры, _ и -). Без него имя пира — inventory_hostname.
+#
+#     ru_exit:
+#       hosts:
+#         vpn_ru_exit:
+#           ansible_host: 203.0.113.40
+#           ansible_user: ubuntu
+#           endpoint_host: 203.0.113.40
+#       vars:
+#         awg_subnet: 10.10.4.0/24
+#         server_name: "RU exit 3.1"
+#         wan_interface: eth0
 ---
 all:
   children:
@@ -45,3 +62,9 @@ all:
         awg_subnet: 10.10.2.0/24
         server_name: "Russia 3.1"
         endpoint_host: 203.0.113.20
+    ru_exit:
+      hosts: {}
+      vars:
+        awg_subnet: 10.10.4.0/24
+        server_name: "RU exit 3.1"
+        wan_interface: eth0
