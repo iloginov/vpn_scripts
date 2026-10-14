@@ -5,7 +5,7 @@ aliases: ["deploy_exit", "Настройка выходной ноды"]
 ---
 # Настройка выходной ноды (exit)
 
-Ручной деплой. Автоматизация: [deploy_ansible.md](deploy_ansible.md). Транзит: [deploy_transit.md](deploy_transit.md). Middle (тройка): [deploy_middle.md](deploy_middle.md).
+Ручной деплой. Автоматизация: [deploy_ansible.md](deploy_ansible.md) или SSH [../ssh/README.md](../ssh/README.md). Транзит: [deploy_transit.md](deploy_transit.md). Middle (тройка): [deploy_middle.md](deploy_middle.md).
 
 Сначала exit, пока до него есть SSH. **Пара:** пир `transit` → `client_transit.conf` для awg1 на entry. **Новая тройка, exit ещё открыт:** пир `middle` → `client_middle.conf`. Если пара уже стоит и из страны exit заблокирован — не этот файл, а [deploy_middle.md](deploy_middle.md): заход на exit только через `ssh -J middle`.
 

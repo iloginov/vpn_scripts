@@ -5,7 +5,7 @@ aliases: ["deploy_transit", "Настройка транзитной ноды"]
 ---
 # Настройка транзитной ноды (transit / entry)
 
-Ручной деплой. Автоматизация: [deploy_ansible.md](deploy_ansible.md). Выходная нода: [deploy_exit.md](deploy_exit.md). Middle (тройка): [deploy_middle.md](deploy_middle.md).
+Ручной деплой. Автоматизация: [deploy_ansible.md](deploy_ansible.md) или SSH [../ssh/README.md](../ssh/README.md). Выходная нода: [deploy_exit.md](deploy_exit.md). Middle (тройка): [deploy_middle.md](deploy_middle.md).
 
 **Пара:** после exit — awg1 из `client_transit.conf`. **Тройка:** после middle — awg1 из `client_entry.conf`.
 

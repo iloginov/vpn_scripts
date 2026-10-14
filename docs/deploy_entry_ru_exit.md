@@ -7,7 +7,7 @@ aliases: ["deploy_entry_ru_exit", "Выход через РФ"]
 
 Ручное добавление к entry, который уже работает по [deploy_transit.md](deploy_transit.md). Тот же порядок — ветка «с выходом через РФ» при настройке entry с нуля.
 
-Ansible: [deploy_ansible.md](deploy_ansible.md). `bootstrap_ru_exit.yml` поднимает российский выход, `add_ru_exit.yml` подключает уже работающий entry. Playbook не опускает `awg0` и дописывает в него только правило метки `1100`. Раздел «Уже работающий entry» ниже — ручная замена всех хуков, она как раз опускает `awg0`.
+Ansible: [deploy_ansible.md](deploy_ansible.md). `bootstrap_ru_exit.yml` поднимает российский выход, `add_ru_exit.yml` подключает уже работающий entry. Playbook не опускает `awg0` и дописывает в него только правило метки `1100`. Раздел «Уже работающий entry» ниже — ручная замена всех хуков, она как раз опускает `awg0`. SSH-скрипт `ssh/add-ru.sh` идёт по этому ручному разделу: [../ssh/README.md](../ssh/README.md).
 
 Клиентские конфиги не перевыпускаются. `awg1` и таблица `clientroute` остаются путём для всего, что не попало в список российских сетей.
 

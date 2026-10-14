@@ -4,6 +4,7 @@ __pycache__/
 amneziawg_*/
 .DS_Store
 ansible/inventory/hosts.yml
+ssh/hosts.env
 ansible/artifacts/*
 !ansible/artifacts/.gitignore
 clients_status.md

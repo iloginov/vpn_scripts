@@ -10,13 +10,14 @@
 | [docs/deploy_middle.md](docs/deploy_middle.md) | Ручная настройка middle (тройка: entry → middle → exit) |
 | [docs/deploy_awg2_pair_middle.md](docs/deploy_awg2_pair_middle.md) | Пара 2.0: ansible поднимает middle и заново exit на 3.1, entry остаётся 2.0 |
 | [docs/deploy_ansible.md](docs/deploy_ansible.md) | Ansible: пара, тройка, insert_middle, российский выход |
+| [ssh/README.md](ssh/README.md) | То же по SSH, шаги из ручных гайдов |
 | [docs/awg2_protocol_params.md](docs/awg2_protocol_params.md) | Параметры AmneziaWG 2.0 (H/S/I, Jc/Jmin/Jmax), мимикрия |
 | [docs/awg3_protocol_params.md](docs/awg3_protocol_params.md) | Параметры AmneziaWG 3.0/3.1 (HPK, padding, RandomTrailers) |
 | [docs/xray_plan.md](docs/xray_plan.md) | План AWG + Xray/VLESS+Reality на одной паре (не внедрение) |
 
 ## AWG 3.1 (`awg_manage.py`)
 
-Управление конфигами: `awg_manage.py` + каталог `packages/vpn_awg/`. Первичный деплой — [docs/deploy_ansible.md](docs/deploy_ansible.md) или ручные [docs/deploy_exit.md](docs/deploy_exit.md) / [docs/deploy_transit.md](docs/deploy_transit.md) / [docs/deploy_middle.md](docs/deploy_middle.md).
+Управление конфигами: `awg_manage.py` + каталог `packages/vpn_awg/`. Первичный деплой — [docs/deploy_ansible.md](docs/deploy_ansible.md), SSH-скрипты [ssh/README.md](ssh/README.md) или ручные [docs/deploy_exit.md](docs/deploy_exit.md) / [docs/deploy_transit.md](docs/deploy_transit.md) / [docs/deploy_middle.md](docs/deploy_middle.md).
 
 Параметры obfs и профили мимикрии — [docs/awg2_protocol_params.md](docs/awg2_protocol_params.md), [docs/awg3_protocol_params.md](docs/awg3_protocol_params.md). Генерация типов мимикрии в коде портирована с [AmneziaWG-Architect](https://github.com/Vadim-Khristenko/AmneziaWG-Architect) (`generator.ts`, пулы хостов).
 

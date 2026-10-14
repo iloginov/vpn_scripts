@@ -17,7 +17,7 @@ ssh -J vps@MIDDLE_IP vps@EXIT_IP
 
 Подставьте свои IP и пользователя. Ниже везде `vps`, `MIDDLE_IP`, `EXIT_IP`, `ENTRY_IP`.
 
-Автоматизация того же порядка: [deploy_ansible.md](deploy_ansible.md), playbook `insert_middle.yml`.
+Автоматизация того же порядка: [deploy_ansible.md](deploy_ansible.md), playbook `insert_middle.yml`, или SSH [../ssh/README.md](../ssh/README.md) (`ssh/insert-middle.sh`).
 
 ## 1. Ключ на middle
 
