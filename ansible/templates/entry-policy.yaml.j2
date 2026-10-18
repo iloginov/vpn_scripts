@@ -1,3 +1,5 @@
+schema: 2
+
 client:
   iface: awg0
   subnet: {{ awg_subnet }}
@@ -20,10 +22,3 @@ ru_exit:
   fwmark: {{ ru_fwmark }}
   priority: {{ ru_rule_priority }}
   rules_path: /etc/awg-ru-split/rules.nft
-  pools:
-    combine: union
-    sources:
-      - name: ipdeny
-        url: https://www.ipdeny.com/ipblocks/data/aggregated/ru-aggregated.zone
-      - name: ipverse
-        url: https://raw.githubusercontent.com/ipverse/country-ip-blocks/master/country/ru/ipv4-aggregated.txt

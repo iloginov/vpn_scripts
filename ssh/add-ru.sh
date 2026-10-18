@@ -95,14 +95,15 @@ scp_to "$REPO/awg_policy.py" "$ENTRY_SSH" awg/awg_policy.py
 scp_args=("${SSH_OPTS[@]}")
 scp -r "${scp_args[@]}" "$REPO/packages" "$ENTRY_SSH:awg/"
 
-log "$ENTRY_SSH: awg_policy render"
+log "$ENTRY_SSH: awg_policy fetch и render"
 remote_bash "$ENTRY_SSH" user <<'EOF'
 set -euo pipefail
 cd "$HOME/awg"
 find . -path "./.venv" -prune -o -name "__pycache__" -print | xargs rm -rf
 . .venv/bin/activate
 pip install -r requirements.txt
-python awg_policy.py render entry.yaml --dest /tmp/awg-policy
+python awg_policy.py fetch entry.yaml --cache /tmp/awg-policy-cache
+python awg_policy.py render entry.yaml --dest /tmp/awg-policy --cache /tmp/awg-policy-cache
 EOF
 
 entry_dir=$(find_awg_dir "$ENTRY_SSH" entry)

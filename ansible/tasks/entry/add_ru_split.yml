@@ -179,6 +179,17 @@
   delegate_to: localhost
   become: false
 
+- name: awg_policy fetch (списки в кеш)
+  ansible.builtin.command:
+    cmd: >-
+      {{ vpn_repo_root }}/.venv/bin/python
+      {{ vpn_repo_root }}/awg_policy.py fetch
+      {{ playbook_dir }}/../artifacts/ru-split-{{ inventory_hostname }}.yaml
+      --cache {{ playbook_dir }}/../artifacts/ru-split-{{ inventory_hostname }}-cache
+  delegate_to: localhost
+  become: false
+  changed_when: true
+
 - name: awg_policy render
   ansible.builtin.command:
     cmd: >-
@@ -186,6 +197,7 @@
       {{ vpn_repo_root }}/awg_policy.py render
       {{ playbook_dir }}/../artifacts/ru-split-{{ inventory_hostname }}.yaml
       --dest {{ playbook_dir }}/../artifacts/ru-split-{{ inventory_hostname }}
+      --cache {{ playbook_dir }}/../artifacts/ru-split-{{ inventory_hostname }}-cache
   delegate_to: localhost
   become: false
   changed_when: true

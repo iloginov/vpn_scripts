@@ -3,29 +3,40 @@
 Без секции ru_exit — файрвол пары: NAT и MSS только на основной канал.
 С секцией — тот же файл плюс awg2 и таблица awg_ru_split.
 Скрипт пишет файлы и не вызывает nft.
+
+Список российских сетей: база (страна из ipverse) плюс добавления минус исключения;
+правки лежат в split-overrides.yaml рядом с policy yaml. Скачивание (fetch) и
+сборка (render) разделены: сборка идёт из кеша и не ходит в сеть.
 """
 
 from __future__ import annotations
 
 import re
+import shutil
+import time
 import urllib.error
 import urllib.request
+from bisect import bisect_right
 from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv4Network, summarize_address_range
 from pathlib import Path
 
 import yaml
 
-_TOP_KEYS = frozenset({"client", "uplink", "rules", "ru_exit"})
+SCHEMA_VERSION = 2
+OVERRIDES_FILE = "split-overrides.yaml"
+MAX_OVERRIDE_ITEMS = 400
+_TOP_KEYS = frozenset({"schema", "client", "uplink", "rules", "ru_exit"})
 _CLIENT_KEYS = frozenset({"iface", "subnet", "listen_port"})
 _CHANNEL_KEYS = frozenset({"iface", "table", "table_id"})
 _RULE_KEYS = frozenset({"to_client_priority", "iif_priority", "from_priority"})
-_RU_KEYS = frozenset(
-    {"iface", "table", "table_id", "fwmark", "priority", "rules_path", "pools"}
-)
-_POOL_KEYS = frozenset({"combine", "sources"})
-_SOURCE_KEYS = frozenset({"name", "url"})
-_COMBINE = frozenset({"union", "intersection", "first"})
+_RU_KEYS = frozenset({"iface", "table", "table_id", "fwmark", "priority", "rules_path"})
+_OVERRIDE_KEYS = frozenset({"schema", "base", "include", "exclude"})
+_BASE_KEYS = frozenset({"type", "code"})
+_BASE_TYPES = frozenset({"country", "geo"})
+_COUNTRY = re.compile(r"^[a-z]{2}$")
+_AS_ITEM = re.compile(r"^AS([0-9]{1,10})$", re.IGNORECASE)
+_IPVERSE = "https://raw.githubusercontent.com/ipverse"
 _IFACE = re.compile(r"^[A-Za-z][A-Za-z0-9._-]{0,14}$")
 _TABLE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,31}$")
 _USER_AGENT = "awg-policy"
@@ -43,9 +54,22 @@ class Channel:
 
 
 @dataclass(frozen=True)
-class PoolSource:
-    name: str
-    url: str
+class Base:
+    type: str
+    code: str
+
+    def label(self) -> str:
+        return f"{self.type}:{self.code}"
+
+
+@dataclass(frozen=True)
+class Overrides:
+    base: Base
+    include: tuple[str, ...] = ()
+    exclude: tuple[str, ...] = ()
+
+
+DEFAULT_OVERRIDES = Overrides(base=Base("country", "ru"))
 
 
 @dataclass(frozen=True)
@@ -56,8 +80,6 @@ class RuExit:
     fwmark: int
     priority: int
     rules_path: str
-    combine: str
-    sources: tuple[PoolSource, ...]
 
 
 @dataclass(frozen=True)
@@ -83,6 +105,12 @@ def load_policy(path: Path) -> Policy:
 
 
 def policy_from_dict(raw: dict, origin: str = "policy") -> Policy:
+    schema = raw.get("schema")
+    if schema != SCHEMA_VERSION:
+        raise PolicyError(
+            f"{origin}: schema {schema if schema is not None else 'нет'}, "
+            f"рендерер ждёт {SCHEMA_VERSION} — запишите entry.yaml заново"
+        )
     unknown = set(raw) - _TOP_KEYS
     if unknown:
         raise PolicyError(f"{origin}: неизвестные ключи: {', '.join(sorted(unknown))}")
@@ -134,10 +162,11 @@ def policy_from_dict(raw: dict, origin: str = "policy") -> Policy:
 
 
 def parse_prefixes(text: str, source: str) -> list[IPv4Network]:
+    """Список сетей источника: строки на # и IPv6 пропускаются, остальное — публичный IPv4 CIDR."""
     nets: list[IPv4Network] = []
     for lineno, raw in enumerate(text.splitlines(), 1):
         line = raw.split("#", 1)[0].strip()
-        if not line:
+        if not line or ":" in line:
             continue
         try:
             net = IPv4Network(line, strict=True)
@@ -153,28 +182,182 @@ def parse_prefixes(text: str, source: str) -> list[IPv4Network]:
     return nets
 
 
-def combine_prefixes(
-    groups: list[list[IPv4Network]],
-    mode: str,
-) -> list[IPv4Network]:
-    if mode not in _COMBINE:
-        raise PolicyError(f"pools.combine: {mode}")
-    if not groups:
-        raise PolicyError("пулы пусты")
-    ranges = [_merge_ranges(_ranges(group)) for group in groups]
-    if mode == "first":
-        chosen = ranges[0]
-    elif mode == "union":
-        chosen = _merge_ranges([span for group in ranges for span in group])
-    else:
-        chosen = ranges[0]
-        for other in ranges[1:]:
-            chosen = _intersect_ranges(chosen, other)
-    if not chosen:
-        raise PolicyError("после combine список сетей пуст")
+def overrides_from_dict(raw: object, origin: str = OVERRIDES_FILE) -> Overrides:
+    data = _mapping(raw, origin)
+    _reject_unknown(data, _OVERRIDE_KEYS, origin)
+    if data.get("schema", SCHEMA_VERSION) != SCHEMA_VERSION:
+        raise PolicyError(f"{origin}: schema {data.get('schema')}, рендерер ждёт {SCHEMA_VERSION}")
+    base = DEFAULT_OVERRIDES.base
+    if "base" in data:
+        braw = _mapping(data["base"], f"{origin}: base")
+        _reject_unknown(braw, _BASE_KEYS, f"{origin}: base")
+        kind = str(braw.get("type", base.type))
+        code = str(braw.get("code", base.code))
+        if kind not in _BASE_TYPES:
+            raise PolicyError(f"{origin}: base.type: country или geo, получено {kind!r}")
+        if _COUNTRY.fullmatch(code) is None:
+            raise PolicyError(f"{origin}: base.code: две строчные латинские буквы, получено {code!r}")
+        base = Base(kind, code)
+    include = _override_items(data.get("include"), f"{origin}: include")
+    exclude = _override_items(data.get("exclude"), f"{origin}: exclude")
+    if len(include) + len(exclude) > MAX_OVERRIDE_ITEMS:
+        raise PolicyError(f"{origin}: не больше {MAX_OVERRIDE_ITEMS} элементов в include и exclude")
+    return Overrides(base=base, include=include, exclude=exclude)
+
+
+def load_overrides(path: Path) -> Overrides:
+    """Правки списка; нет файла — страна по умолчанию без правок."""
+    if not path.is_file():
+        return DEFAULT_OVERRIDES
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise PolicyError(f"{path}: yaml: {exc}") from exc
+    return overrides_from_dict(raw if raw is not None else {}, origin=str(path))
+
+
+def source_url(kind: str, ident: str) -> str:
+    """URL списка ipverse: kind — country, geo или as (ident — код страны или номер AS)."""
+    if kind == "country":
+        return f"{_IPVERSE}/country-ip-blocks/master/country/{ident}/ipv4-aggregated.txt"
+    if kind == "geo":
+        return f"{_IPVERSE}/geo-ip-blocks/master/country/{ident}/{ident}-ipv4.txt"
+    if kind == "as":
+        return f"{_IPVERSE}/as-ip-blocks/master/as/{ident}/ipv4-aggregated.txt"
+    raise PolicyError(f"неизвестный тип источника: {kind}")
+
+
+def override_as_numbers(overrides: Overrides) -> list[str]:
+    """Номера AS из include и exclude без повторов, в порядке появления."""
+    found: list[str] = []
+    for item in (*overrides.include, *overrides.exclude):
+        match = _AS_ITEM.fullmatch(item)
+        if match and match.group(1) not in found:
+            found.append(match.group(1))
+    return found
+
+
+def fetch_to_cache(
+    overrides: Overrides,
+    cache_dir: Path,
+    fetch=None,
+    now=time.time,
+) -> None:
+    """Скачать базу и все AS правок в кеш; при любой ошибке прежний кеш остаётся."""
+    fetch = fetch or fetch_text
+    new = cache_dir.with_name(cache_dir.name + ".new")
+    old = cache_dir.with_name(cache_dir.name + ".old")
+    shutil.rmtree(new, ignore_errors=True)
+    new.mkdir(parents=True)
+    try:
+        base = overrides.base
+        _fetch_list(fetch, "base", source_url(base.type, base.code), new / "base.txt",
+                    f"{base.type} {base.code}: нет такого списка в ipverse")
+        for number in override_as_numbers(overrides):
+            _fetch_list(
+                fetch, f"AS{number}", source_url("as", number), new / f"as-{number}.txt",
+                f"AS{number}: нет в as-ip-blocks — AS не анонсирует префиксы 90 дней или не существует",
+            )
+        (new / ".base").write_text(f"{base.label()}\n", encoding="utf-8")
+        (new / ".fetched").write_text(f"{int(now())}\n", encoding="utf-8")
+        shutil.rmtree(old, ignore_errors=True)
+        if cache_dir.exists():
+            cache_dir.rename(old)
+        new.rename(cache_dir)
+        shutil.rmtree(old, ignore_errors=True)
+    except BaseException:
+        shutil.rmtree(new, ignore_errors=True)
+        raise
+
+
+def _fetch_list(fetch, label: str, url: str, dest: Path, missing: str) -> None:
+    try:
+        text = fetch(url)
+    except NotFoundError as exc:
+        raise PolicyError(missing) from exc
+    dest.write_text(_prefix_text(sorted(parse_prefixes(text, label))), encoding="utf-8")
+
+
+@dataclass(frozen=True)
+class BuiltList:
+    nets: list[IPv4Network]
+    excluded_prefixes: int
+
+
+def build_list(overrides: Overrides, cache_dir: Path) -> BuiltList:
+    """(база ∪ include) − exclude из кеша, без сети."""
+    base = overrides.base
+    marker = cache_dir / ".base"
+    have = marker.read_text(encoding="utf-8").strip() if marker.is_file() else None
+    if (cache_dir / "base.txt").is_file() and have != base.label():
+        raise PolicyError(
+            f"кеш скачан для {have or 'неизвестного источника'}, а в правках {base.label()} — "
+            "сначала обновите списки"
+        )
+    included = _cached(cache_dir, "base.txt", f"base ({base.label()})")
+    excluded: list[tuple[int, int]] = []
+    for item in overrides.include:
+        included += _item_ranges(item, cache_dir)
+    for item in overrides.exclude:
+        excluded += _item_ranges(item, cache_dir)
+    union = _merge_ranges(included)
+    cut = _merge_ranges(excluded)
+    touched = sum(
+        1 for net in _spans_to_nets(union) if _overlaps(cut, int(net.network_address), int(net.broadcast_address))
+    )
+    result = _subtract_ranges(union, cut)
+    if not result:
+        raise PolicyError("после исключений список сетей пуст")
+    return BuiltList(nets=_spans_to_nets(result), excluded_prefixes=touched)
+
+
+def summary_lines(
+    built: BuiltList,
+    overrides: Overrides,
+    previous: list[IPv4Network],
+) -> list[str]:
+    now = _merge_ranges(_ranges(built.nets))
+    was = _merge_ranges(_ranges(previous))
+    added = _subtract_ranges(now, was)
+    removed = _subtract_ranges(was, now)
+    changed = _merge_ranges(added + removed)
+    was_addrs = _address_count(was)
+    now_addrs = _address_count(now)
+    shrink = 0 if was_addrs == 0 else max(0, (was_addrs - now_addrs) * 100 // was_addrs)
+    values = [
+        ("was_prefixes", len(_spans_to_nets(was))),
+        ("now_prefixes", len(built.nets)),
+        ("was_addrs", was_addrs),
+        ("now_addrs", now_addrs),
+        ("added_prefixes", len(_spans_to_nets(added))),
+        ("removed_prefixes", len(_spans_to_nets(removed))),
+        ("excluded_prefixes", built.excluded_prefixes),
+        ("changed_prefixes", len(_spans_to_nets(changed))),
+        ("shrink_pct", shrink),
+        ("base", overrides.base.label()),
+        ("includes", len(overrides.include)),
+        ("excludes", len(overrides.exclude)),
+    ]
+    return [f"summary {key}={value}" for key, value in values]
+
+
+_ELEMENTS = re.compile(r"elements\s*=\s*\{([^}]*)\}", re.DOTALL)
+_CIDR = re.compile(r"\b(\d{1,3}(?:\.\d{1,3}){3}/\d{1,2})\b")
+
+
+def read_applied_nets(path: Path) -> list[IPv4Network]:
+    """Сети из elements = { … } применённого rules.split.nft; нет файла — пусто."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
     nets: list[IPv4Network] = []
-    for start, end in chosen:
-        nets.extend(summarize_address_range(IPv4Address(start), IPv4Address(end)))
+    for block in _ELEMENTS.findall(text):
+        for token in _CIDR.findall(block):
+            try:
+                nets.append(IPv4Network(token, strict=True))
+            except ValueError:
+                continue
     return nets
 
 
@@ -302,6 +485,10 @@ def render_route_hooks(iface: str, table: str) -> str:
     )
 
 
+class NotFoundError(PolicyError):
+    """Источник ответил 404: такого списка нет."""
+
+
 def fetch_text(url: str, timeout: float = 60) -> str:
     if url.startswith("file:"):
         return _read_url(url, timeout)
@@ -309,6 +496,12 @@ def fetch_text(url: str, timeout: float = 60) -> str:
     for attempt in range(3):
         try:
             return _read_url(url, timeout)
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                raise NotFoundError(f"{url}: HTTP 404") from exc
+            last = exc
+            if 400 <= exc.code < 500 or attempt == 2:
+                break
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             last = exc
             if attempt == 2:
@@ -316,20 +509,9 @@ def fetch_text(url: str, timeout: float = 60) -> str:
     raise PolicyError(f"не скачать {url}: {last}")
 
 
-def fetch_pools(policy: Policy, fetch=fetch_text) -> list[tuple[str, list[IPv4Network]]]:
-    ru = policy.ru_exit
-    if ru is None:
-        return []
-    loaded: list[tuple[str, list[IPv4Network]]] = []
-    for source in ru.sources:
-        text = fetch(source.url)
-        loaded.append((source.name, parse_prefixes(text, source.name)))
-    return loaded
-
-
 def render_files(
     policy: Policy,
-    pools: list[tuple[str, list[IPv4Network]]],
+    nets: list[IPv4Network] | None,
 ) -> dict[str, str]:
     files = {
         "nftables.conf": render_nftables(policy),
@@ -339,13 +521,11 @@ def render_files(
     ru = policy.ru_exit
     if ru is None:
         return files
-    groups = [nets for _name, nets in pools]
-    combined = combine_prefixes(groups, ru.combine)
-    files["rules.nft"] = render_ru_table(policy, combined)
+    if not nets:
+        raise PolicyError("список российских сетей пуст")
+    files["rules.nft"] = render_ru_table(policy, nets)
     files["hooks/awg2.hooks"] = render_route_hooks(ru.iface, ru.table)
-    files["pools/combined.txt"] = _prefix_text(combined)
-    for name, nets in pools:
-        files[f"pools/{_pool_filename(name)}.txt"] = _prefix_text(combine_prefixes([nets], "first"))
+    files["pools/combined.txt"] = _prefix_text(nets)
     return files
 
 
@@ -379,31 +559,14 @@ def _parse_ru(raw: object, uplink_iface: str, client_iface: str) -> RuExit | Non
     if raw is None:
         return None
     data = _mapping(raw, "ru_exit")
+    if "pools" in data:
+        raise PolicyError(
+            "ru_exit.pools: больше не поддерживается, источник задаёт split-overrides.yaml"
+        )
     _reject_unknown(data, _RU_KEYS, "ru_exit")
     iface = _iface(_required(data, "iface", "ru_exit"), "ru_exit.iface")
     if iface in {uplink_iface, client_iface}:
         raise PolicyError("ru_exit.iface совпадает с client или uplink")
-    pools = _mapping(_required(data, "pools", "ru_exit"), "ru_exit.pools")
-    _reject_unknown(pools, _POOL_KEYS, "ru_exit.pools")
-    combine = pools.get("combine", "union")
-    if combine not in _COMBINE:
-        raise PolicyError(f"ru_exit.pools.combine: {combine}")
-    sources_raw = pools.get("sources")
-    if not isinstance(sources_raw, list) or not sources_raw:
-        raise PolicyError("ru_exit.pools.sources: нужен непустой список")
-    sources: list[PoolSource] = []
-    names: set[str] = set()
-    for index, item in enumerate(sources_raw):
-        source = _mapping(item, f"ru_exit.pools.sources[{index}]")
-        _reject_unknown(source, _SOURCE_KEYS, f"ru_exit.pools.sources[{index}]")
-        name = str(_required(source, "name", f"sources[{index}]")).strip()
-        url = str(_required(source, "url", f"sources[{index}]")).strip()
-        if not name or name in names:
-            raise PolicyError(f"sources[{index}].name: пустое или повтор")
-        if not url:
-            raise PolicyError(f"sources[{index}].url: пусто")
-        names.add(name)
-        sources.append(PoolSource(name=name, url=url))
     rules_path = str(data.get("rules_path", "/etc/awg-ru-split/rules.nft"))
     if not rules_path.startswith("/") or '"' in rules_path or "\n" in rules_path:
         raise PolicyError("ru_exit.rules_path: нужен абсолютный путь без кавычек")
@@ -414,8 +577,6 @@ def _parse_ru(raw: object, uplink_iface: str, client_iface: str) -> RuExit | Non
         fwmark=_fwmark(_required(data, "fwmark", "ru_exit"), "ru_exit.fwmark"),
         priority=_priority(_required(data, "priority", "ru_exit"), "ru_exit.priority"),
         rules_path=rules_path,
-        combine=str(combine),
-        sources=tuple(sources),
     )
 
 
@@ -428,13 +589,6 @@ def _mss_block(iface: str) -> str:
 
 def _prefix_text(nets: list[IPv4Network]) -> str:
     return "".join(f"{net}\n" for net in nets)
-
-
-def _pool_filename(name: str) -> str:
-    cleaned = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in name)
-    if not cleaned:
-        raise PolicyError("пустое имя пула")
-    return cleaned
 
 
 def _ranges(nets: list[IPv4Network]) -> list[tuple[int, int]]:
@@ -451,23 +605,89 @@ def _merge_ranges(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
     return [(start, end) for start, end in merged]
 
 
-def _intersect_ranges(
-    left: list[tuple[int, int]],
-    right: list[tuple[int, int]],
+def _subtract_ranges(
+    spans: list[tuple[int, int]],
+    cut: list[tuple[int, int]],
 ) -> list[tuple[int, int]]:
+    """spans − cut; оба списка объединены и отсортированы."""
     out: list[tuple[int, int]] = []
-    i = 0
     j = 0
-    while i < len(left) and j < len(right):
-        start = max(left[i][0], right[j][0])
-        end = min(left[i][1], right[j][1])
-        if start <= end:
-            out.append((start, end))
-        if left[i][1] < right[j][1]:
-            i += 1
-        else:
+    for start, end in spans:
+        cur = start
+        while j < len(cut) and cut[j][1] < cur:
             j += 1
+        k = j
+        while k < len(cut) and cut[k][0] <= end:
+            c_start, c_end = cut[k]
+            if c_start > cur:
+                out.append((cur, c_start - 1))
+            cur = max(cur, c_end + 1)
+            if cur > end:
+                break
+            k += 1
+        if cur <= end:
+            out.append((cur, end))
     return out
+
+
+def _overlaps(spans: list[tuple[int, int]], start: int, end: int) -> bool:
+    """Пересекает ли [start, end] хоть один из объединённых диапазонов."""
+    i = bisect_right(spans, (start, 2**33)) - 1
+    if i >= 0 and spans[i][1] >= start:
+        return True
+    return i + 1 < len(spans) and spans[i + 1][0] <= end
+
+
+def _spans_to_nets(spans: list[tuple[int, int]]) -> list[IPv4Network]:
+    nets: list[IPv4Network] = []
+    for start, end in spans:
+        nets.extend(summarize_address_range(IPv4Address(start), IPv4Address(end)))
+    return nets
+
+
+def _address_count(spans: list[tuple[int, int]]) -> int:
+    return sum(end - start + 1 for start, end in spans)
+
+
+def _cached(cache_dir: Path, name: str, label: str) -> list[tuple[int, int]]:
+    path = cache_dir / name
+    if not path.is_file():
+        raise PolicyError(f"нет в кеше: {label} — сначала обновите списки")
+    return _ranges(parse_prefixes(path.read_text(encoding="utf-8"), name))
+
+
+def _item_ranges(item: str, cache_dir: Path) -> list[tuple[int, int]]:
+    match = _AS_ITEM.fullmatch(item)
+    if match:
+        return _cached(cache_dir, f"as-{match.group(1)}.txt", f"AS{match.group(1)}")
+    return _ranges([IPv4Network(item, strict=True)])
+
+
+def _override_items(value: object, label: str) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise PolicyError(f"{label}: нужен список")
+    items: list[str] = []
+    for raw in value:
+        text = str(raw).strip()
+        match = _AS_ITEM.fullmatch(text)
+        if match:
+            number = int(match.group(1))
+            if number > 4294967295:
+                raise PolicyError(f"{label}: {text}: номер AS вне диапазона")
+            item = f"AS{number}"
+        else:
+            try:
+                net = IPv4Network(text, strict=True)
+            except ValueError as exc:
+                raise PolicyError(f"{label}: {text!r} — не AS и не сеть IPv4 (a.b.c.d/n)") from exc
+            if not 8 <= net.prefixlen <= 32:
+                raise PolicyError(f"{label}: {text}: маска от /8 до /32")
+            item = str(net)
+        if item not in items:
+            items.append(item)
+    return tuple(items)
 
 
 def _read_url(url: str, timeout: float) -> str:

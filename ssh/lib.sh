@@ -272,6 +272,8 @@ EOF
 ru_entry_yaml() {
   local subnet=$1
   cat <<EOF
+schema: 2
+
 client:
   iface: awg0
   subnet: $subnet
@@ -294,13 +296,6 @@ ru_exit:
   fwmark: 0x100
   priority: 1100
   rules_path: /etc/awg-ru-split/rules.nft
-  pools:
-    combine: union
-    sources:
-      - name: ipdeny
-        url: https://www.ipdeny.com/ipblocks/data/aggregated/ru-aggregated.zone
-      - name: ipverse
-        url: https://raw.githubusercontent.com/ipverse/country-ip-blocks/master/country/ru/ipv4-aggregated.txt
 EOF
 }
 

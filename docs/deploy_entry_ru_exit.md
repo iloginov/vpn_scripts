@@ -26,7 +26,7 @@ entry, awg0 (10.10.2.0/24)
 
 На entry клиентский адрес прячется NAT-ом. Сервер в РФ видит один источник — адрес `awg2` (в примерах `10.10.4.2/32`), не адреса `10.10.2.0/24`. Так же exit видит только адрес `awg1`.
 
-Сплит только IPv4. Список сетей — агрегат RU с ipdeny. DNS клиентов (`1.1.1.1`) в этот список не входит, запросы идут в `awg1`, а уже резолвленный российский адрес — в `awg2`.
+Сплит только IPv4. Список сетей — агрегат страны из ipverse (по умолчанию `country ru`), с правками из `split-overrides.yaml`. DNS клиентов (`1.1.1.1`) в этот список не входит, запросы идут в `awg1`, а уже резолвленный российский адрес — в `awg2`.
 
 Состояние после перезагрузки и после `down`/`up` держат те же места, что и пара без РФ:
 
@@ -142,6 +142,8 @@ sudo systemctl enable awg-quick@awg2
 Его кладут на entry как `~/awg/entry.yaml`. В репозитории два готовых файла: без сплита — [policy/entry.example.yaml](../policy/entry.example.yaml), со сплитом — [policy/entry.ru.example.yaml](../policy/entry.ru.example.yaml). Для этого гайда копируют второй и правят подсеть, если она не `10.10.2.0/24`.
 
 ```yaml
+schema: 2
+
 client:
   iface: awg0
   subnet: 10.10.2.0/24
@@ -164,13 +166,6 @@ ru_exit:
   fwmark: 0x100
   priority: 1100
   rules_path: /etc/awg-ru-split/rules.nft
-  pools:
-    combine: union
-    sources:
-      - name: ipdeny
-        url: https://www.ipdeny.com/ipblocks/data/aggregated/ru-aggregated.zone
-      - name: ipverse
-        url: https://raw.githubusercontent.com/ipverse/country-ip-blocks/master/country/ru/ipv4-aggregated.txt
 ```
 
 | Ключ | Смысл |
@@ -180,27 +175,28 @@ ru_exit:
 | `uplink` | основной канал. Интерфейс `awg1`, таблица `clientroute`, id `100` — строка в `/etc/iproute2/rt_tables` |
 | `rules.to_client_priority` | приоритет `1000`: пакеты к адресам клиентов идут в `main`, а не в туннель |
 | `rules.iif_priority`, `rules.from_priority` | приоритеты `2000` и `2010` у правил `iif awg0` и `from <подсеть>` → `clientroute`. В хуки попадают только вместе с `ru_exit`. Без секции эти два правила остаются без явного приоритета, как на текущих entry |
+| `schema` | версия формата, сейчас `2`. Рендерер с другой версией отказывает: `entry.yaml` пишут заново |
 | `ru_exit` | второй канал. Нет секции — файрвол без `awg2` и без списков сетей |
 | `ru_exit.iface`, `table`, `table_id` | `awg2`, таблица `ruroute`, id `101` |
 | `ru_exit.fwmark`, `priority` | метка `0x100` и приоритет `1100`. Он обязан лежать строго между `to_client_priority` и `iif_priority` |
 | `ru_exit.rules_path` | куда потом копируют `rules.nft`. Тот же путь скрипт вписывает в `include` внутри `nftables.conf` |
-| `pools.combine` | `union` — адрес российский, если он есть хотя бы в одном списке. `intersection` — только пересечение адресного пространства. `first` — только первый URL |
-| `pools.sources` | откуда качать списки. Имена `ipdeny` и `ipverse` попадают в имена файлов в `pools/` |
+Откуда брать список, задаёт не `entry.yaml`, а `split-overrides.yaml` рядом с ним (ниже). Ключ `ru_exit.pools` больше не поддерживается.
 
 `awg1` в этом файле — имя интерфейса и таблица маршрутов. Адрес туннеля (`10.10.1.2/32` или другой) сюда не пишется: он уже лежит в клиентском конфиге, из которого собран `awg1.conf`. То же для адреса `awg2`.
 
 ### 4. Собрать файрвол из policy
 
-На entry нужны `awg_policy.py`, каталог `packages/` и venv с `requirements.txt` (`pyyaml`). Дальше `render` читает `~/awg/entry.yaml`.
+На entry нужны `awg_policy.py`, каталог `packages/` и venv с `requirements.txt` (`pyyaml`). Дальше `fetch` и `render` читают `~/awg/entry.yaml` и `~/awg/split-overrides.yaml`, если он есть.
 
 ```sh
 cd ~/awg
 source .venv/bin/activate
 pip install -r requirements.txt
-python awg_policy.py render entry.yaml --dest /tmp/awg-policy
+python awg_policy.py fetch entry.yaml --cache /tmp/awg-policy-cache
+python awg_policy.py render entry.yaml --dest /tmp/awg-policy --cache /tmp/awg-policy-cache
 ```
 
-Скрипт качает ipdeny и ipverse, проверяет, что в списках только публичные IPv4-сети, и пишет файлы. Если скачивание или проверка оборвались, каталог `--dest` не меняется. В рабочий ruleset он ничего не грузит.
+`fetch` качает базовый список страны и списки AS из правок, проверяет, что в них только публичные IPv4-сети, и кладёт их в кеш; при любой ошибке прежний кеш остаётся. `render` ходить в сеть не умеет: собирает файлы из кеша, печатает сводку (`summary …`: было, стало, добавлено, убрано, отсеяно исключениями) и отказывается, если список после вычитания пуст. В рабочий ruleset он ничего не грузит.
 
 ```text
 /tmp/awg-policy/nftables.conf
@@ -208,10 +204,25 @@ python awg_policy.py render entry.yaml --dest /tmp/awg-policy
 /tmp/awg-policy/hooks/awg0.hooks
 /tmp/awg-policy/hooks/awg1.hooks
 /tmp/awg-policy/hooks/awg2.hooks
-/tmp/awg-policy/pools/
+/tmp/awg-policy/pools/combined.txt
 ```
 
-`pools.combine: union` считает адрес российским, если он есть хотя бы в одном списке. Повторять `render` — это и есть обновление пулов.
+Список считается так: `(база ∪ include) − exclude`, исключения сильнее добавлений. Обновить его — повторить `fetch` и `render`.
+
+#### split-overrides.yaml
+
+Необязательный файл рядом с `entry.yaml` ([пример](../policy/split-overrides.example.yaml)). Нет файла — база `country ru`, правок нет.
+
+```yaml
+schema: 2
+base:
+  type: country   # country — делегирование RIR; geo — регистрационные данные (geo-ip-blocks)
+  code: ru        # две строчные латинские буквы
+include: [AS64500, 203.0.113.0/24]   # принудительно в российский канал
+exclude: [AS64501, 198.51.100.0/24]  # принудительно мимо него
+```
+
+Источники — репозитории ipverse (CC0, обновляются ежедневно): `country-ip-blocks`, `geo-ip-blocks`, `as-ip-blocks`. AS без анонсов за 90 дней или несуществующая страна дают HTTP 404, и `fetch` завершается ошибкой. `vpn-admin` ведёт этот файл сам (клавиша `s` на экране «Настройка» entry).
 
 `forward_guard` стоит раньше обычного filter forward. Российский пакет с `awg0`, который собрался уйти не в `awg2`, отбрасывается. Пока `awg2` поднят и правило `1100` на месте, правило не совпадает. Оно закрывает провал: `down awg2` снимает default в `ruroute`, пустая таблица не выбирает маршрут, ядро идёт в `clientroute` (`awg1`). Guard этот переход режет.
 

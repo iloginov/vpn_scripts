@@ -1,5 +1,8 @@
 # Entry с выходом российских сетей через второй сервер.
-# Повторный render заново забирает пулы и переписывает файлы. nft сам не запускает.
+# Список сетей: fetch качает базу и AS из split-overrides.yaml рядом с этим файлом
+# (нет файла — country ru), render собирает файлы из кеша без сети. nft сам не запускает.
+schema: 2
+
 client:
   iface: awg0
   subnet: 10.10.2.0/24
@@ -24,13 +27,3 @@ ru_exit:
   fwmark: 0x100
   priority: 1100
   rules_path: /etc/awg-ru-split/rules.nft
-  pools:
-    # union — адрес российский, если он есть хотя бы в одном списке.
-    # intersection — только пересечение адресного пространства.
-    # first — только первый источник.
-    combine: union
-    sources:
-      - name: ipdeny
-        url: https://www.ipdeny.com/ipblocks/data/aggregated/ru-aggregated.zone
-      - name: ipverse
-        url: https://raw.githubusercontent.com/ipverse/country-ip-blocks/master/country/ru/ipv4-aggregated.txt
